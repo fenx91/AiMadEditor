@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+librosa
+torch
+torchvision
+transformers
+numpy
+soundfile
+pydantic
+scikit-learn
+pytest
+httpx

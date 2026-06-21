@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>HyperFrames Render Template</title>
+    <!-- GSAP for animations if needed -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        #viewport {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-layer {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            object-fit: cover;
+            opacity: 0;
+            z-index: 1;
+        }
+
+        /* Overlay captions/watermark for style */
+        #hud {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            z-index: 10;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 14px;
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 15px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            pointer-events: none;
+            display: none; /* Hide in final render unless debugging */
+        }
+        
+        #hud-time {
+            color: #00f2fe;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="viewport" data-composition-id="mv" data-width="1920" data-height="1080" data-start="0" data-duration="10.44">
+    <!-- VIDEO_ELEMENTS_PLACEHOLDER -->
+</div>
+<audio id="bg-audio" src="audio.mp3" data-start="0" data-duration="10.44" data-track-index="0" data-volume="1"></audio>
+
+<div id="hud">
+    <div>TIME: <span id="hud-time">0.00s</span></div>
+    <div id="hud-clip">CLIP: None</div>
+</div>
+
+<script>
+    let renderData = null;
+    let videoElements = [];
+    let isPlaying = false;
+    let globalTime = 0;
+    let audio = null;
+    let currentShowingIndex = -1;
+    
+    // We fetch render_data.json
+    async function loadRenderData() {
+        try {
+            const response = await fetch('render_data.json');
+            renderData = await response.json();
+            initTemplate();
+        } catch (e) {
+            console.error("Error loading render data:", e);
+            document.body.innerHTML = `<h1 style="color:red; text-align:center; padding:100px;">Failed to load render_data.json</h1>`;
+        }
+    }
+
+    function initTemplate() {
+        const viewport = document.getElementById('viewport');
+        videoElements = [];
+        
+        // Set metadata attributes for HyperFrames renderer compatibility
+        viewport.setAttribute('data-composition-id', 'mv');
+        viewport.setAttribute('data-width', '1920'); // 1920x1080 landscape
+        viewport.setAttribute('data-height', '1080');
+        viewport.setAttribute('data-duration', renderData.duration || '10');
+        
+        // Register composition timeline
+        window.__timelines = window.__timelines || {};
+        window.__timelines['mv'] = {
+            seek: function(time) {
+                return window.seekTo(time);
+            }
+        };
+        
+        // Setup Audio if present (for real-time browser preview)
+        if (renderData.audioPath) {
+            audio = document.getElementById('bg-audio');
+            // Load audio via endpoint or local file copy
+            // The app.py copies the audio as audio.mp3 / audio.wav into the template folder
+            // Let's search for the copied audio
+            const ext = renderData.audioPath.split('.').pop();
+            audio.src = 'audio.' + ext;
+            audio.load();
+        }
+
+        // Retrieve static Video Elements from DOM
+        videoElements = Array.from(viewport.querySelectorAll('video'));
+        videoElements.forEach(video => {
+            video.load();
+        });
+
+        // Show HUD if debugging or if run in non-headless browser
+        if (!navigator.userAgent.includes("Headless")) {
+            document.getElementById('hud').style.display = 'block';
+            setupKeyboardControls();
+        }
+        // Expose a function for HyperFrames frame-by-frame rendering
+        window.seekTo = function(time) {
+            globalTime = time;
+            return updateTimeline(time);
+        };
+
+        // Initial draw
+        updateTimeline(0);
+    }
+
+    function getActiveSlotIndex(time) {
+        if (!renderData) return -1;
+        return renderData.slots.findIndex(s => time >= s.startTime && time < s.endTime);
+    }
+
+    function updateTimeline(time) {
+        if (!renderData) return Promise.resolve();
+        
+        const activeIndex = getActiveSlotIndex(time);
+        const isRendering = navigator.userAgent.includes("Headless");
+        console.log(`[updateTimeline] time=${time.toFixed(3)} isRendering=${isRendering} activeIndex=${activeIndex}`);
+        
+        document.getElementById('hud-time').textContent = time.toFixed(2) + 's';
+        let seekPromise = Promise.resolve();
+        
+        if (activeIndex !== -1) {
+            const activeVideo = videoElements[activeIndex];
+            const slot = renderData.slots[activeIndex];
+            const clipTime = slot.clipStart + (time - slot.startTime);
+            
+            // Show clip name in HUD
+            const filename = slot.videoPath.split(/[/\\]/).pop();
+            document.getElementById('hud-clip').textContent = `CLIP: ${filename} (at ${clipTime.toFixed(2)}s)`;
+            
+            // Sync current time of video
+            const isRendering = navigator.userAgent.includes("Headless");
+            const timeDiff = Math.abs(activeVideo.currentTime - clipTime);
+            
+            // Control playback
+            if (isPlaying) {
+                if (activeVideo.paused) activeVideo.play().catch(e => {});
+            } else {
+                if (!activeVideo.paused) activeVideo.pause();
+            }
+            
+            if (isRendering) {
+                // In headless rendering, HyperFrames blocks/aborts media network requests.
+                // The video tags cannot load the files and will not fire 'seeked'.
+                // We update currentTime synchronously and show the video immediately.
+                activeVideo.currentTime = clipTime;
+                showActiveVideo(activeIndex);
+                seekPromise = Promise.resolve();
+            } else if ((isPlaying && timeDiff > 0.1) || (!isPlaying && timeDiff > 0.01)) {
+                // Clean up any pending seek listener on this video
+                if (activeVideo._seekCleanup) {
+                    activeVideo._seekCleanup();
+                }
+                
+                seekPromise = new Promise((resolve) => {
+                    const onSeeked = () => {
+                        activeVideo.removeEventListener('seeked', onSeeked);
+                        activeVideo._seekCleanup = null;
+                        showActiveVideo(activeIndex);
+                        resolve();
+                    };
+                    activeVideo.addEventListener('seeked', onSeeked);
+                    activeVideo._seekCleanup = () => {
+                        activeVideo.removeEventListener('seeked', onSeeked);
+                        resolve();
+                    };
+                    activeVideo.currentTime = clipTime;
+                });
+            } else {
+                showActiveVideo(activeIndex);
+            }
+        } else {
+            // Hide all videos if outside slots
+            videoElements.forEach(v => {
+                v.style.opacity = '0';
+                v.style.zIndex = '1';
+                if (!v.paused) v.pause();
+            });
+            currentShowingIndex = -1;
+        }
+        
+        return seekPromise;
+    }
+
+    function showActiveVideo(activeIndex) {
+        if (currentShowingIndex === activeIndex) return;
+        
+        videoElements.forEach((video, index) => {
+            if (index === activeIndex) {
+                video.style.opacity = '1';
+                video.style.zIndex = '2';
+            } else {
+                // If it is not the active index, hide it and pause
+                video.style.opacity = '0';
+                video.style.zIndex = '1';
+                if (!video.paused) video.pause();
+            }
+        });
+        currentShowingIndex = activeIndex;
+    }
+
+    // Keyboard controls for manual preview in normal browser
+    function setupKeyboardControls() {
+        let playInterval = null;
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (isPlaying) {
+                    isPlaying = false;
+                    if (audio) audio.pause();
+                    clearInterval(playInterval);
+                    updateTimeline(globalTime);
+                } else {
+                    isPlaying = true;
+                    if (audio) {
+                        audio.currentTime = globalTime;
+                        audio.play().catch(err => console.log(err));
+                    }
+                    
+                    const startRealTime = Date.now() - (globalTime * 1000);
+                    playInterval = setInterval(() => {
+                        globalTime = (Date.now() - startRealTime) / 1000;
+                        if (globalTime >= renderData.duration) {
+                            globalTime = 0;
+                            isPlaying = false;
+                            if (audio) audio.pause();
+                            clearInterval(playInterval);
+                        }
+                        updateTimeline(globalTime);
+                    }, 1000 / 60); // 60fps clock
+                }
+            }
+        });
+    }
+
+    window.addEventListener('DOMContentLoaded', loadRenderData);
+</script>
+</body>
+</html>

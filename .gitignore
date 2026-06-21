@@ -1,0 +1,41 @@
+# Python virtual environment and caches
+venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js binaries & modules
+node/
+node_modules/
+
+# Databases and temporary media data
+data/metadata.db
+data/music/*
+!data/music/.gitkeep
+data/proxies/*
+!data/proxies/.gitkeep
+data/keyframes/*
+!data/keyframes/.gitkeep
+
+# Raw video inputs directories
+in/
+in2/
+
+# Rendered output folder
+output/*
+!output/.gitkeep
+
+# Dynamically generated rendering workspace files
+hyperframes_template/temp_video_*
+hyperframes_template/render_data.json
+hyperframes_template/audio*
+hyperframes_template/index.html
+
+# IDE configurations & System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

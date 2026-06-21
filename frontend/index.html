@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI MV Script & HyperFrames Studio</title>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+    <div class="glow-bg"></div>
+    <div class="app-container">
+        <!-- Top Navigation Header -->
+        <header class="app-header">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <div class="logo-text">
+                    <h1>HYPER<span>FRAMES</span></h1>
+                    <p>AI MV Script & Rendering Workflow</p>
+                </div>
+            </div>
+            <div class="header-controls">
+                <div class="indexing-panel glass-card">
+                    <input type="text" id="index-dir-input" placeholder="输入本地视频素材文件夹绝对路径..." value="/home/fenxy/editor/in" />
+                    <button id="index-dir-btn" class="btn btn-primary">
+                        <span class="icon">🔍</span> 索引视频
+                    </button>
+                </div>
+                <div class="status-badge" id="model-status">
+                    <span class="status-dot green"></span>
+                    <span class="status-text">CLIP 加载中...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="app-main">
+            <!-- Left Side: Song Upload & Lyrics Checklist -->
+            <section class="panel-left glass-card">
+                <div class="panel-header">
+                    <h2>🎵 音乐与歌词导入</h2>
+                </div>
+                <div class="upload-zone" id="upload-zone">
+                    <input type="file" id="audio-file-input" accept="audio/*" style="display:none;" />
+                    <input type="file" id="lyric-file-input" accept=".lrc,.txt" style="display:none;" />
+                    
+                    <div class="upload-box" id="audio-upload-box">
+                        <span class="upload-icon">🎵</span>
+                        <p class="upload-title">选择或拖拽音乐文件</p>
+                        <p class="upload-desc">支持 MP3, WAV 等格式</p>
+                        <span class="file-name-display" id="audio-name">未选择文件</span>
+                    </div>
+                    
+                    <div class="upload-box" id="lyric-upload-box">
+                        <span class="upload-icon">📄</span>
+                        <p class="upload-title">选择或拖拽歌词文件 (可选)</p>
+                        <p class="upload-desc">优先支持带时间轴的 .lrc</p>
+                        <span class="file-name-display" id="lyric-name">未选择文件</span>
+                    </div>
+                    
+                    <button id="process-music-btn" class="btn btn-secondary btn-full" disabled>
+                        分析歌曲与歌词
+                    </button>
+                </div>
+
+                <!-- Audio Trimming Panel (initially hidden) -->
+                <div class="trimmer-card glass-card" id="audio-trimmer-card" style="display:none; margin-top:15px; padding:15px; border-radius:12px;">
+                    <div class="panel-header-sub" style="margin-top:0; margin-bottom:10px;">
+                        <h3>✂️ 音频裁剪控制</h3>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="audio-trim-start" style="font-size:11px; margin-bottom:4px; display:block;">起始时间 (秒):</label>
+                            <input type="number" id="audio-trim-start" min="0" value="0" step="1" style="width:100%; padding:6px; background:rgba(255,255,255,0.05); border:1px solid var(--border-color); border-radius:6px; color:#fff;" />
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="audio-trim-end" style="font-size:11px; margin-bottom:4px; display:block;">结束时间 (秒):</label>
+                            <input type="number" id="audio-trim-end" min="1" value="60" step="1" style="width:100%; padding:6px; background:rgba(255,255,255,0.05); border:1px solid var(--border-color); border-radius:6px; color:#fff;" />
+                        </div>
+                    </div>
+                    <button id="trim-audio-btn" class="btn btn-accent btn-full" style="font-size:12px; padding:8px 0; border-radius:8px;">
+                        ⚡ 确认截取音频与歌词
+                    </button>
+                </div>
+
+                <div class="lyrics-panel-container">
+                    <div class="panel-header-sub">
+                        <h3>💬 歌词卡点槽位</h3>
+                        <span class="badge" id="lyrics-count">0 行</span>
+                    </div>
+                    <div class="lyrics-list" id="lyrics-list">
+                        <div class="empty-state">
+                            <p>上传音乐与歌词以开始</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Center Panel: Timeline & Preview -->
+            <section class="panel-center">
+                <!-- Video Monitor Proxy Player -->
+                <div class="monitor-card glass-card">
+                    <div class="monitor-header">
+                        <div class="monitor-title">🎥 视频监视器 (360p Preview)</div>
+                        <div class="monitor-info" id="monitor-video-name">未加载素材</div>
+                    </div>
+                    <div class="video-container">
+                        <video id="preview-player-a" controls preload="auto" muted style="width: 100%; height: 100%; object-fit: contain; display: none;"></video>
+                        <video id="preview-player-b" controls preload="auto" muted style="width: 100%; height: 100%; object-fit: contain; display: none;"></video>
+                        <div class="video-placeholder" id="video-placeholder">
+                            <div class="placeholder-content">
+                                <span class="placeholder-icon">🎬</span>
+                                <p>预览播放区</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="clip-trimmer" id="clip-trimmer" style="display:none;">
+                        <div class="trimmer-header">
+                            <span>⏱️ 视频片段截取起点微调:</span>
+                            <span class="badge" id="trimmer-value">0.0s</span>
+                        </div>
+                        <div class="trimmer-slider-container">
+                            <span class="time-label">0.0s</span>
+                            <input type="range" id="trimmer-range" min="0" max="100" step="0.1" value="0">
+                            <span class="time-label" id="trimmer-max-label">10.0s</span>
+                        </div>
+                        <div class="trimmer-manual-controls" style="display: flex; gap: 8px; align-items: center; margin-top: 10px; justify-content: space-between;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <label for="trimmer-input" style="font-size: 10px; color: var(--text-secondary);">微调数值:</label>
+                                <input type="number" id="trimmer-input" min="0" step="0.1" value="0.0" style="width: 70px; padding: 4px 6px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; font-family: var(--font-mono); outline: none;">
+                            </div>
+                            <div style="display: flex; gap: 4px;">
+                                <button id="trim-btn-sub-1s" class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px; border-radius: 4px;">-1.0s</button>
+                                <button id="trim-btn-sub-01s" class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px; border-radius: 4px;">-0.1s</button>
+                                <button id="trim-btn-add-01s" class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px; border-radius: 4px;">+0.1s</button>
+                                <button id="trim-btn-add-1s" class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px; border-radius: 4px;">+1.0s</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Interactive Waveform Timeline -->
+                <div class="timeline-card glass-card">
+                    <div class="timeline-toolbar">
+                        <div class="playback-controls">
+                            <button id="play-btn" class="btn btn-circle" disabled>▶</button>
+                            <span class="time-display" id="time-display">00:00.0 / 00:00.0</span>
+                            <div class="volume-control" style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
+                                <span class="volume-icon" style="font-size: 14px; cursor: pointer; user-select: none;" id="volume-mute-btn">🔊</span>
+                                <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.8" style="width: 80px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255, 255, 255, 0.15); border-radius: 2px; outline: none;" />
+                            </div>
+                        </div>
+                        <div class="bpm-info" id="bpm-display">BPM: --</div>
+                    </div>
+                    
+                    <div class="timeline-scroll-container">
+                        <div class="timeline-ruler" id="timeline-ruler">
+                            <!-- Timestamps will be drawn dynamically -->
+                        </div>
+                        <div class="timeline-visualizer-container">
+                            <canvas id="waveform-canvas" height="80"></canvas>
+                            <div class="playhead" id="playhead"></div>
+                        </div>
+                        <div class="timeline-tracks" id="timeline-tracks">
+                            <div class="track-label">歌词段落</div>
+                            <div class="track-items" id="lyric-track-items">
+                                <!-- Lyric segments blocks will go here -->
+                            </div>
+                            <div class="track-label">视频素材</div>
+                            <div class="track-items" id="video-track-items">
+                                <!-- Selected video blocks will go here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Side: AI Assistant & Matching Candidates -->
+            <section class="panel-right glass-card">
+                <div class="panel-header">
+                    <h2>🤖 AI 智能匹配推荐</h2>
+                </div>
+                
+                <div class="active-lyric-details">
+                    <div class="active-lyric-header">当前选中槽位</div>
+                    <div class="active-lyric-text" id="active-lyric-text">请在左侧或时间轴上选择一个歌词槽位</div>
+                    <div class="active-lyric-meta" id="active-lyric-meta">时间区间: --s</div>
+                    <button id="clear-slot-btn" class="btn btn-secondary btn-full" style="display:none; margin-top: 10px; font-size:11px; padding:6px; border-color: rgba(255, 100, 100, 0.25); color: #ff6b6b; font-weight: 500;">
+                        ❌ 取消素材关联 (让上文延续)
+                    </button>
+                </div>
+
+                <div class="matching-settings">
+                    <div class="form-group">
+                        <label for="search-query-input">🔍 自定义搜索提示词:</label>
+                        <input type="text" id="search-query-input" placeholder="留空默认使用当前歌词语义进行匹配..." style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 12px; outline: none; transition: border-color 0.2s;" />
+                    </div>
+                    <div class="form-group">
+                        <label for="motion-preference">🕺 画面运动感偏好:</label>
+                        <select id="motion-preference">
+                            <option value="any">任何节奏 (无限制)</option>
+                            <option value="low">宁静舒缓 (低运动度)</option>
+                            <option value="medium">律动适中 (中运动度)</option>
+                            <option value="high">激情动感 (高运动度)</option>
+                        </select>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <button id="find-matches-btn" class="btn btn-primary" style="padding: 8px 10px; font-size: 12px;" disabled>
+                            ⚡ 语义匹配此段
+                        </button>
+                        <button id="auto-match-all-btn" class="btn btn-accent" style="padding: 8px 10px; font-size: 12px;" disabled>
+                            🤖 一键智能匹配
+                        </button>
+                    </div>
+                </div>
+
+                <div class="manual-assign-settings" style="padding: 15px; border-bottom: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.005);">
+                    <div class="active-lyric-header" style="margin-bottom: 8px;">🛠️ 手动选择素材与时间轴</div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label for="manual-video-select" style="font-size: 10px; color: var(--text-secondary);">选择素材视频:</label>
+                        <select id="manual-video-select" style="width: 100%; padding: 6px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px;">
+                            <option value="">-- 请选择索引库中的视频 --</option>
+                        </select>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: flex-end; margin-bottom: 5px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="manual-clip-start" style="font-size: 10px; color: var(--text-secondary);">起始时间轴 (秒):</label>
+                            <input type="number" id="manual-clip-start" min="0" step="0.1" value="0.0" style="width: 100%; padding: 5px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; font-family: var(--font-mono);" />
+                        </div>
+                        <button id="manual-assign-btn" class="btn btn-secondary" style="padding: 5px 0; font-size: 11px; width: 100%; font-weight: 500;" disabled>
+                            💾 应用此素材
+                        </button>
+                    </div>
+                </div>
+
+                <div class="candidates-container">
+                    <div class="panel-header-sub">
+                        <h3>💡 AI 候选片段</h3>
+                        <span class="badge" id="candidates-count">Top 5</span>
+                    </div>
+                    <div class="candidates-list" id="candidates-list">
+                        <div class="empty-state">
+                            <p>选择歌词并点击匹配推荐</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Bottom Action Bar -->
+        <footer class="app-footer glass-card">
+            <div class="footer-left">
+                <div class="timeline-stats">
+                    <span>已填充: <strong id="filled-slots-count">0</strong> / <strong id="total-slots-count">0</strong> 个卡点</span>
+                    <span class="divider">|</span>
+                    <span>渲染预估时长: <strong id="estimated-duration">0.0</strong> 秒</span>
+                </div>
+            </div>
+            <div class="footer-right">
+                <button id="render-btn" class="btn btn-accent btn-large" disabled>
+                    🎬 一键渲染高清 MV
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modals (for progress and logs) -->
+    <div class="modal-overlay" id="modal-overlay" style="display:none;">
+        <div class="modal-card glass-card">
+            <div class="modal-header">
+                <h3 id="modal-title">⚙️ 系统执行中</h3>
+            </div>
+            <div class="modal-body">
+                <div class="spinner-container">
+                    <div class="double-bounce1"></div>
+                    <div class="double-bounce2"></div>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="modal-progress-bar" style="width: 0%;"></div>
+                </div>
+                <p id="modal-status-msg">正在进行数据处理，请稍候...</p>
+                <div class="log-console" id="modal-log-console"></div>
+            </div>
+            <div class="modal-footer" id="modal-footer" style="display:none;">
+                <button id="modal-close-btn" class="btn btn-secondary">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/assets/app.js"></script>
+</body>
+</html>
