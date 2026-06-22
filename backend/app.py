@@ -135,7 +135,8 @@ def api_get_videos():
         
         videos = []
         for r in rows:
-            proxy_url = f"/api/video_file?path={urllib.parse.quote(r[1])}" if r[1] else ""
+            target_path = r[2] if r[2] else r[1]
+            proxy_url = f"/api/video_file?path={urllib.parse.quote(target_path)}" if target_path else ""
             videos.append({
                 "id": r[0],
                 "original_path": r[1],
@@ -715,8 +716,9 @@ def api_match(req: MatchRequest):
         
         # Adjust paths for Web UI display
         for cand in candidates:
-            # Serve original video path as proxy_url
-            cand["proxy_url"] = f"/api/video_file?path={urllib.parse.quote(cand['video_path'])}"
+            # Serve proxy video path as proxy_url for browser playability
+            target_path = cand.get("proxy_path") if cand.get("proxy_path") else cand["video_path"]
+            cand["proxy_url"] = f"/api/video_file?path={urllib.parse.quote(target_path)}"
             cand["frame_url"] = f"/data/keyframes/{os.path.basename(cand['frame_path'])}"
             
             # Find the segment that contains the candidate timestamp
@@ -778,7 +780,9 @@ def api_batch_match(req: BatchMatchRequest):
         
         for idx, candidates in batch_candidates.items():
             for cand in candidates:
-                cand["proxy_url"] = f"/api/video_file?path={urllib.parse.quote(cand['video_path'])}"
+                # Serve proxy video path as proxy_url for browser playability
+                target_path = cand.get("proxy_path") if cand.get("proxy_path") else cand["video_path"]
+                cand["proxy_url"] = f"/api/video_file?path={urllib.parse.quote(target_path)}"
                 cand["frame_url"] = f"/data/keyframes/{os.path.basename(cand['frame_path'])}"
                 
                 cursor.execute("""
@@ -979,8 +983,10 @@ def api_render(req: RenderRequest):
             video_tags = []
             for i, slot in enumerate(slots_data):
                 slot_duration = slot["endTime"] - slot["startTime"]
+                # Omit 'muted' and set volume if this slot keeps audio so HyperFrames extracts its audio track
+                audio_attr = 'volume="0.8"' if slot.get("keepAudio") else 'muted'
                 video_tags.append(
-                    f'<video class="video-layer" id="video_{i}" src="{slot["videoPath"]}" data-start="{slot["startTime"]}" data-duration="{slot_duration}" preload="auto" muted></video>'
+                    f'<video class="video-layer" id="video_{i}" src="{slot["videoPath"]}" data-start="{slot["startTime"]}" data-duration="{slot_duration}" preload="auto" {audio_attr}></video>'
                 )
             video_elements_html = "\n    ".join(video_tags)
             
