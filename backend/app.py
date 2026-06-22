@@ -135,7 +135,16 @@ def api_get_videos():
         
         videos = []
         for r in rows:
-            target_path = r[2] if r[2] else r[1]
+            # Prefer 1080p high-res render proxy if generated, otherwise fallback to 360p proxy or original
+            original_path = r[1]
+            base_name = os.path.splitext(os.path.basename(original_path))[0] if original_path else ""
+            render_path = os.path.join("data/proxies", f"{base_name}_render.mp4") if base_name else ""
+            
+            if render_path and os.path.exists(render_path):
+                target_path = render_path
+            else:
+                target_path = r[2] if r[2] else original_path
+                
             proxy_url = f"/api/video_file?path={urllib.parse.quote(target_path)}" if target_path else ""
             videos.append({
                 "id": r[0],
@@ -537,6 +546,7 @@ def api_generate_script_plan(req: ScriptPlanRequest):
 
     # --- 3. Build material library overview from DB ---
     material_overview = ""
+    dialogue_overview = ""
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -557,27 +567,47 @@ def api_generate_script_plan(req: ScriptPlanRequest):
             if summaries:
                 bullets = "；".join(s[:50] for s in summaries)
                 overview_parts.append(f"- {scene_type}（{label}）：{bullets}")
+        
+        # Fetch top emotional transcripts with dialogue
+        cur.execute("""
+            SELECT transcript, summary, COALESCE(mad_score, 5)
+            FROM video_segments
+            WHERE scene_type = 'emotional' AND transcript IS NOT NULL AND transcript != ''
+            ORDER BY mad_score DESC
+            LIMIT 15
+        """)
+        dialogue_rows = cur.fetchall()
+        if dialogue_rows:
+            dialogue_bullets = "\n".join([f"- \"{r[0]}\" (画面描述: {r[1]}, 精彩评分: {r[2]})" for r in dialogue_rows if r[0]])
+            dialogue_overview = "\n【素材库中存在的高情感张力角色台词列表（规划大纲时请有意识地在关键分镜或复刻经典段落处设计使用）：】\n" + dialogue_bullets
+            
         conn.close()
         if overview_parts:
             material_overview = "【可用素材概览（请优先选用库中存在的画面类型，不要凭空生成素材中不存在的场景）】:\n" + "\n".join(overview_parts)
     except Exception as e:
         print(f"[ScriptPlan] Material overview query error: {e}")
         material_overview = ""
+        dialogue_overview = ""
 
     # --- 4. Build and call Gemini ---
     lyrics_json = json.dumps([{"index": i, "text": l.text} for i, l in enumerate(req.lyrics)], ensure_ascii=False, indent=2)
     prompt = f"""
-你是一个专业的 AMV/MAD 视频剪辑脚本导演。请根据以下音乐歌词列表、用户的创作视角以及可用素材概览，生成一份完整的分段叙事大纲。
+你是一个专业的 AMV/MAD 视频剪辑脚本导演。请根据以下音乐歌词列表、用户的创作视角、可用素材概览以及真实角色台词列表，生成一份完整的分段叙事大纲。
 
 【用户创作视角/心情偏好】:
 "{req.user_vision}"
 
 {material_overview}
+{dialogue_overview}
 
 【歌词列表（含行号）】:
 {lyrics_json}
 
 ---
+## 规划角色台词与原声融合：
+- 上方的【高情感张力角色台词列表】中包含了我们素材库里真实的经典对白和音轨。
+- 在音乐的“开篇/引子（Intro）”或“情感爆发/高潮/经典复刻段（Climax）”等关键情绪分镜点，请有意识地把这些真实存在的台词对白融合进分镜的画面描述（`visual_prompt`）和情感基调（`emotional_tone`）中。
+- 例如，若歌词是情感转折点，可设计：`visual_prompt: "画面切换到佐佐木在雨中递给田山一听罐装咖啡，对她说：'没关系的，我在呢'，深秋落叶，暖色调路灯"`，确保台词大意契合我们提供的台词列表，避免凭空虚构不存在的台词。
 ## 第一步：段落划分与叙事规划
 通读全部歌词后，将其划分为若干有意义的段落（如 Verse 1 / Pre-Chorus / Chorus / Bridge / Outro 等）。
 每个段落需定义：
@@ -716,8 +746,16 @@ def api_match(req: MatchRequest):
         
         # Adjust paths for Web UI display
         for cand in candidates:
-            # Serve proxy video path as proxy_url for browser playability
-            target_path = cand.get("proxy_path") if cand.get("proxy_path") else cand["video_path"]
+            # Serve 1080p high-res render proxy if exists, otherwise fallback to 360p proxy or original for browser preview
+            original_path = cand["video_path"]
+            base_name = os.path.splitext(os.path.basename(original_path))[0] if original_path else ""
+            render_path = os.path.join("data/proxies", f"{base_name}_render.mp4") if base_name else ""
+            
+            if render_path and os.path.exists(render_path):
+                target_path = render_path
+            else:
+                target_path = cand.get("proxy_path") if cand.get("proxy_path") else original_path
+                
             cand["proxy_url"] = f"/api/video_file?path={urllib.parse.quote(target_path)}"
             cand["frame_url"] = f"/data/keyframes/{os.path.basename(cand['frame_path'])}"
             
@@ -780,8 +818,16 @@ def api_batch_match(req: BatchMatchRequest):
         
         for idx, candidates in batch_candidates.items():
             for cand in candidates:
-                # Serve proxy video path as proxy_url for browser playability
-                target_path = cand.get("proxy_path") if cand.get("proxy_path") else cand["video_path"]
+                # Serve 1080p high-res render proxy if exists, otherwise fallback to 360p proxy or original for browser preview
+                original_path = cand["video_path"]
+                base_name = os.path.splitext(os.path.basename(original_path))[0] if original_path else ""
+                render_path = os.path.join("data/proxies", f"{base_name}_render.mp4") if base_name else ""
+                
+                if render_path and os.path.exists(render_path):
+                    target_path = render_path
+                else:
+                    target_path = cand.get("proxy_path") if cand.get("proxy_path") else original_path
+                    
                 cand["proxy_url"] = f"/api/video_file?path={urllib.parse.quote(target_path)}"
                 cand["frame_url"] = f"/data/keyframes/{os.path.basename(cand['frame_path'])}"
                 
