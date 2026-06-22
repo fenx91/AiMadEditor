@@ -23,7 +23,8 @@ let audioEl = new Audio();
 let isPlaying = false;
 let playheadInterval = null;
 let allIndexedVideos = [];
-let currentVolume = 0.8;
+let musicVolume = 0.8;
+let dialogueVolume = 0.8;
 let isMuted = false;
 let lastPreviewSlotIndex = null;
 let activePlayer = null;
@@ -85,6 +86,7 @@ const el = {
     totalSlotsCount: document.getElementById('total-slots-count'),
     estimatedDuration: document.getElementById('estimated-duration'),
     renderBtn: document.getElementById('render-btn'),
+    exportXmlBtn: document.getElementById('export-xml-btn'),
     
     modalOverlay: document.getElementById('modal-overlay'),
     modalTitle: document.getElementById('modal-title'),
@@ -93,7 +95,8 @@ const el = {
     modalLogConsole: document.getElementById('modal-log-console'),
     modalFooter: document.getElementById('modal-footer'),
     modalCloseBtn: document.getElementById('modal-close-btn'),
-    volumeSlider: document.getElementById('volume-slider'),
+    musicVolumeSlider: document.getElementById('music-volume-slider'),
+    dialogueVolumeSlider: document.getElementById('dialogue-volume-slider'),
     volumeMuteBtn: document.getElementById('volume-mute-btn'),
     clearSlotBtn: document.getElementById('clear-slot-btn'),
     autoMatchAllBtn: document.getElementById('auto-match-all-btn'),
@@ -177,8 +180,11 @@ function updateModelStatus(ok, text) {
 }
 
 function updateVolume() {
-    const targetVolume = isMuted ? 0 : currentVolume;
-    audioEl.volume = targetVolume;
+    const targetMusicVolume = isMuted ? 0 : musicVolume;
+    const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
+    
+    audioEl.volume = targetMusicVolume;
+    
     // Dynamically sync active preview player's volume and muted state based on keep_audio status
     if (activePlayer) {
         let shouldKeepAudio = false;
@@ -201,23 +207,30 @@ function updateVolume() {
         
         if (shouldKeepAudio && !isMuted) {
             activePlayer.muted = false;
-            activePlayer.volume = targetVolume * 0.8;
+            activePlayer.volume = targetDialogueVolume;
         } else {
             activePlayer.muted = true;
         }
     }
     if (preloadPlayer) preloadPlayer.muted = true;
     
-    // Update mute button icon
-    if (isMuted || targetVolume === 0) {
+    // Update mute button icon and slider values
+    if (isMuted) {
         el.volumeMuteBtn.textContent = "🔇";
-        el.volumeSlider.value = 0;
-    } else if (targetVolume < 0.4) {
-        el.volumeMuteBtn.textContent = "🔈";
-        el.volumeSlider.value = currentVolume;
+        el.musicVolumeSlider.value = 0;
+        el.dialogueVolumeSlider.value = 0;
     } else {
-        el.volumeMuteBtn.textContent = "🔊";
-        el.volumeSlider.value = currentVolume;
+        el.musicVolumeSlider.value = musicVolume;
+        el.dialogueVolumeSlider.value = dialogueVolume;
+        
+        // Show icon based on music volume as primary indicator
+        if (musicVolume === 0 && dialogueVolume === 0) {
+            el.volumeMuteBtn.textContent = "🔇";
+        } else if (musicVolume < 0.4) {
+            el.volumeMuteBtn.textContent = "🔈";
+        } else {
+            el.volumeMuteBtn.textContent = "🔊";
+        }
     }
 }
 
@@ -405,6 +418,43 @@ function setupEventListeners() {
     
     // Render
     el.renderBtn.addEventListener('click', renderVideo);
+    el.exportXmlBtn.addEventListener('click', exportPremiereXml);
+    
+    // Fullscreen on Double Click of Video Container or Players
+    const toggleFullscreen = () => {
+        const videoContainer = document.querySelector('.video-container');
+        if (videoContainer) {
+            if (!document.fullscreenElement) {
+                videoContainer.requestFullscreen().catch(err => {
+                    console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+    };
+    if (el.previewPlayerA) {
+        el.previewPlayerA.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+    }
+    if (el.previewPlayerB) {
+        el.previewPlayerB.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+    }
+    const videoContainer = document.querySelector('.video-container');
+    if (videoContainer) {
+        videoContainer.addEventListener('dblclick', (e) => {
+            if (e.target === videoContainer || e.target.id === 'monitor-dialogue-overlay' || e.target.id === 'monitor-lyric-overlay' || e.target.id === 'video-placeholder' || e.target.closest('.placeholder-content')) {
+                toggleFullscreen();
+            }
+        });
+    }
     
     // Click on waveform to seek
     el.waveformCanvas.addEventListener('click', (e) => {
@@ -429,9 +479,15 @@ function setupEventListeners() {
     });
     
     // Volume controls
-    el.volumeSlider.addEventListener('input', (e) => {
-        currentVolume = parseFloat(e.target.value);
-        isMuted = currentVolume === 0;
+    el.musicVolumeSlider.addEventListener('input', (e) => {
+        musicVolume = parseFloat(e.target.value);
+        if (musicVolume > 0) isMuted = false;
+        updateVolume();
+    });
+    
+    el.dialogueVolumeSlider.addEventListener('input', (e) => {
+        dialogueVolume = parseFloat(e.target.value);
+        if (dialogueVolume > 0) isMuted = false;
         updateVolume();
     });
     
@@ -1047,11 +1103,39 @@ function updatePlayheadPosition() {
     }
 }
 
+// Detect speaker from segment metadata for subtitle coloring
+function detectSpeaker(summary, transcript) {
+    if (!summary) return 'unknown';
+    const s = summary.toLowerCase();
+    const t = transcript ? transcript.toLowerCase() : '';
+    if (s.includes('tayama') || s.includes('田山') || t.includes('田山')) {
+        return 'tayama';
+    }
+    if (s.includes('sasaki') || s.includes('佐佐木') || t.includes('佐佐木')) {
+        return 'sasaki';
+    }
+    if (s.includes('yamada') || s.includes('山田') || t.includes('山田')) {
+        return 'yamada';
+    }
+    return 'unknown';
+}
+
 function updateGlobalPreview(curr) {
     if (!songData) return;
     
     const activeIndex = songData.lyrics.findIndex(l => curr >= l.start && curr < l.end);
     const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex) : null;
+    
+    // 1. Update Monitor Lyric Subtitle Overlay (Bottom)
+    const monitorLyric = document.getElementById('monitor-lyric-overlay');
+    if (monitorLyric) {
+        if (activeIndex !== -1 && songData.lyrics[activeIndex]) {
+            monitorLyric.textContent = songData.lyrics[activeIndex].text;
+            monitorLyric.style.display = 'block';
+        } else {
+            monitorLyric.style.display = 'none';
+        }
+    }
     
     if (effective) {
         // Show video player
@@ -1067,12 +1151,37 @@ function updateGlobalPreview(curr) {
         switchActivePlayer(effective.proxy_url, effective.clip_start);
         
         // Sync unmuting based on keep_audio
-        const targetVolume = isMuted ? 0 : currentVolume;
+        const targetMusicVolume = isMuted ? 0 : musicVolume;
+        const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
         if (effective.keep_audio && !effective.isFallback && !isMuted) {
             activePlayer.muted = false;
-            activePlayer.volume = targetVolume * 0.8;
+            activePlayer.volume = targetDialogueVolume;
         } else {
             activePlayer.muted = true;
+        }
+        audioEl.volume = targetMusicVolume; // Keep BGM volume constant
+        
+        // 2. Update Monitor Dialogue Subtitle Overlay (Top/Middle)
+        const monitorDialogue = document.getElementById('monitor-dialogue-overlay');
+        if (monitorDialogue) {
+            if (effective.keep_audio && !effective.isFallback && effective.transcript) {
+                monitorDialogue.textContent = effective.transcript;
+                monitorDialogue.style.display = 'block';
+                
+                // Color based on speaker
+                const speaker = detectSpeaker(effective.video_name || '', effective.transcript || '');
+                if (speaker === 'tayama') {
+                    monitorDialogue.style.color = '#00f2fe'; // Tayama Cyan
+                } else if (speaker === 'sasaki') {
+                    monitorDialogue.style.color = '#ffcc00'; // Sasaki Yellow
+                } else if (speaker === 'yamada') {
+                    monitorDialogue.style.color = '#ff80bf'; // Yamada Pink
+                } else {
+                    monitorDialogue.style.color = '#ffffff'; // White
+                }
+            } else {
+                monitorDialogue.style.display = 'none';
+            }
         }
         
         // Calculate the target time in the video
@@ -1111,6 +1220,17 @@ function updateGlobalPreview(curr) {
         el.previewPlayerB.style.display = 'none';
         el.videoPlaceholder.style.display = 'flex';
         el.monitorVideoName.textContent = "未匹配素材 (空隙)";
+        
+        // Hide monitor dialogue if gap
+        const monitorDialogue = document.getElementById('monitor-dialogue-overlay');
+        if (monitorDialogue) {
+            monitorDialogue.style.display = 'none';
+        }
+        
+        // Restore BGM volume
+        const targetMusicVolume = isMuted ? 0 : musicVolume;
+        audioEl.volume = targetMusicVolume;
+        
         lastPreviewSlotIndex = null;
     }
 }
@@ -1288,10 +1408,10 @@ function updatePreviewPlayerForSlot(index) {
         switchActivePlayer(slot.proxy_url, slot.clip_start);
         
         // Sync unmuting based on keep_audio
-        const targetVolume = isMuted ? 0 : currentVolume;
+        const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
         if (slot.keep_audio && !isMuted) {
             activePlayer.muted = false;
-            activePlayer.volume = targetVolume * 0.8;
+            activePlayer.volume = targetDialogueVolume;
         } else {
             activePlayer.muted = true;
         }
@@ -1561,8 +1681,22 @@ function assignCandidateToActiveSlot(cand) {
     if (transcript && cand.segment) {
         const score = cand.segment.mad_score || 5;
         const type = cand.segment.scene_type || "";
-        if (type === "emotional" || score >= 8) {
-            keep_audio = true;
+        const sectionName = (scriptPlan && scriptPlan[activeSlotIndex]) ? scriptPlan[activeSlotIndex].section_name : "";
+        const isClimax = sectionName && (
+            sectionName.toLowerCase().includes('chorus') ||
+            sectionName.toLowerCase().includes('副歌') ||
+            sectionName.toLowerCase().includes('intro') ||
+            sectionName.toLowerCase().includes('outro')
+        );
+        
+        if (isClimax) {
+            if (type === "emotional" || score >= 8) {
+                keep_audio = true;
+            }
+        } else {
+            if (type === "emotional" && score >= 9) {
+                keep_audio = true;
+            }
         }
     }
     
@@ -1597,8 +1731,10 @@ function updateFooterStats() {
     
     if (filledCount > 0) {
         el.renderBtn.removeAttribute('disabled');
+        el.exportXmlBtn.removeAttribute('disabled');
     } else {
         el.renderBtn.setAttribute('disabled', 'true');
+        el.exportXmlBtn.setAttribute('disabled', 'true');
     }
 }
 
@@ -1765,8 +1901,22 @@ async function autoMatchAllSlots() {
                     if (transcript && selectedCand.segment) {
                         const score = selectedCand.segment.mad_score || 5;
                         const type = selectedCand.segment.scene_type || "";
-                        if (type === "emotional" || score >= 8) {
-                            keep_audio = true;
+                        const sectionName = (scriptPlan && scriptPlan[idx]) ? scriptPlan[idx].section_name : "";
+                        const isClimax = sectionName && (
+                            sectionName.toLowerCase().includes('chorus') ||
+                            sectionName.toLowerCase().includes('副歌') ||
+                            sectionName.toLowerCase().includes('intro') ||
+                            sectionName.toLowerCase().includes('outro')
+                        );
+                        
+                        if (isClimax) {
+                            if (type === "emotional" || score >= 8) {
+                                keep_audio = true;
+                            }
+                        } else {
+                            if (type === "emotional" && score >= 9) {
+                                keep_audio = true;
+                            }
                         }
                     }
                     
@@ -1851,7 +2001,8 @@ async function renderVideo() {
                 clip_start: effective.clip_start,
                 clip_duration: lyric.end - lyric.start,
                 keep_audio: effective.isFallback ? false : (effective.keep_audio || false),
-                transcript: effective.isFallback ? "" : (effective.transcript || "")
+                transcript: effective.isFallback ? "" : (effective.transcript || ""),
+                speaker: effective.isFallback ? "unknown" : detectSpeaker(effective.video_name || "", effective.transcript || "")
             });
         }
     }
@@ -1869,7 +2020,10 @@ async function renderVideo() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 slots: slotsPayload,
-                audio_path: songData.audio_path
+                audio_path: songData.audio_path,
+                lyrics: songData.lyrics,
+                music_volume: musicVolume,
+                dialogue_volume: dialogueVolume
             })
         });
         
@@ -1898,6 +2052,79 @@ async function renderVideo() {
         appendModalLog(`连接渲染端发生错误: ${e.message}`);
     }
     el.modalFooter.style.display = 'block';
+}
+
+// Export Premiere Pro FCP XML Project File
+async function exportPremiereXml() {
+    if (timelineSlots.filter(s => s !== null).length === 0) return;
+    if (!songData) return;
+    
+    const slotsPayload = [];
+    for (let i = 0; i < songData.lyrics.length; i++) {
+        const lyric = songData.lyrics[i];
+        const effective = getEffectiveSlot(i);
+        
+        if (effective) {
+            slotsPayload.push({
+                start_time: lyric.start,
+                end_time: lyric.end,
+                video_path: effective.video_path,
+                clip_start: effective.clip_start,
+                clip_duration: lyric.end - lyric.start,
+                keep_audio: effective.isFallback ? false : (effective.keep_audio || false),
+                transcript: effective.isFallback ? "" : (effective.transcript || ""),
+                speaker: effective.isFallback ? "unknown" : detectSpeaker(effective.video_name || "", effective.transcript || "")
+            });
+        }
+    }
+    
+    showModal("💾 正在导出 Premiere XML", "生成兼容 Apple Final Cut Pro XML 规格的剪辑时间轨文件...");
+    appendModalLog("正在构建时间轴剪辑决策点...");
+    
+    try {
+        const res = await fetch('/api/export_xml', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                slots: slotsPayload,
+                audio_path: songData.audio_path,
+                lyrics: songData.lyrics,
+                music_volume: musicVolume,
+                dialogue_volume: dialogueVolume
+            })
+        });
+        
+        if (res.ok) {
+            const xmlText = await res.text();
+            
+            // Client-side file download
+            const blob = new Blob([xmlText], { type: 'application/xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'premiere_project.xml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            updateModalProgress(100, "导出成功！");
+            appendModalLog("导出 XML 文件成功！");
+            appendModalLog("已触发浏览器下载，保存的文件名为 'premiere_project.xml'。");
+            appendModalLog("您可以将该 XML 文件直接导入到 Adobe Premiere Pro 或 Final Cut Pro 中，即可还原整条音视频剪辑轨道。");
+            
+            el.modalFooter.style.display = 'block';
+        } else {
+            const errData = await res.json();
+            updateModalProgress(100, "导出失败！");
+            appendModalLog(`错误原因: ${errData.detail || '未知服务器错误'}`);
+            el.modalFooter.style.display = 'block';
+        }
+    } catch (e) {
+        updateModalProgress(100, "网络异常！");
+        appendModalLog(`通信异常: ${e.message}`);
+        el.modalFooter.style.display = 'block';
+    }
 }
 
 // --- New Helper Functions for Manual and Dual Player Control ---

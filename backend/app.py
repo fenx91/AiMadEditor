@@ -5,7 +5,7 @@ import json
 import sqlite3
 import subprocess
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -86,6 +86,7 @@ class TimelineSlot(BaseModel):
     clip_duration: float
     keep_audio: Optional[bool] = False
     transcript: Optional[str] = ""
+    speaker: Optional[str] = "unknown"
 
 class TrimRequest(BaseModel):
     audio_path: str
@@ -96,6 +97,9 @@ class TrimRequest(BaseModel):
 class RenderRequest(BaseModel):
     slots: List[TimelineSlot]
     audio_path: str
+    lyrics: Optional[List[dict]] = None
+    music_volume: Optional[float] = 1.0
+    dialogue_volume: Optional[float] = 1.0
 
 @app.get("/")
 def read_root():
@@ -1001,12 +1005,16 @@ def api_render(req: RenderRequest):
                 "clipStart": slot.clip_start,
                 "clipDuration": slot.clip_duration,
                 "keepAudio": slot.keep_audio,
-                "transcript": slot.transcript
+                "transcript": slot.transcript,
+                "speaker": slot.speaker
             })
             
         render_data = {
             "slots": slots_data,
             "audioPath": abs_audio,
+            "lyrics": req.lyrics if req.lyrics else [],
+            "musicVolume": req.music_volume if req.music_volume is not None else 1.0,
+            "dialogueVolume": req.dialogue_volume if req.dialogue_volume is not None else 1.0,
             "duration": req.slots[-1].end_time if req.slots else 0.0
         }
         
@@ -1124,6 +1132,199 @@ def api_render(req: RenderRequest):
             "output_path": output_mp4,
             "output_url": "/output/mv_output.mp4"
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_path_url(abs_path):
+    path = abs_path.replace('\\', '/')
+    if len(path) > 1 and path[1] == ':':
+        path = '/' + path
+    return "file://localhost" + urllib.parse.quote(path)
+
+@app.post("/api/export_xml")
+def api_export_xml(req: RenderRequest):
+    try:
+        import xml.sax.saxutils
+        
+        # Calculate frames based on timebase 24, NTSC true (23.976fps)
+        def to_frames(secs):
+            return int(round(secs * 24.0))
+            
+        bgm_path = os.path.abspath(req.audio_path)
+        bgm_name = os.path.basename(bgm_path)
+        bgm_url = get_path_url(bgm_path)
+        
+        bgm_duration_secs = req.slots[-1].end_time if req.slots else 0.0
+        bgm_duration_frames = to_frames(bgm_duration_secs)
+        
+        video_clips = []
+        dialogue_clips_l = []
+        dialogue_clips_r = []
+        
+        # Map video files to unique indices for FCP XML file references
+        video_files = {}
+        for slot in req.slots:
+            abs_v_path = os.path.abspath(slot.video_path)
+            if abs_v_path not in video_files:
+                video_files[abs_v_path] = len(video_files) + 1
+                
+        for i, slot in enumerate(req.slots):
+            abs_v_path = os.path.abspath(slot.video_path)
+            file_index = video_files[abs_v_path]
+            clip_name = os.path.basename(abs_v_path)
+            v_url = get_path_url(abs_v_path)
+            
+            start_f = to_frames(slot.start_time)
+            end_f = to_frames(slot.end_time)
+            in_f = to_frames(slot.clip_start)
+            out_f = to_frames(slot.clip_start + (slot.end_time - slot.start_time))
+            
+            source_dur_secs = slot.clip_duration if slot.clip_duration else (slot.end_time - slot.start_time)
+            source_dur_frames = to_frames(max(source_dur_secs, 1000.0))
+            
+            # Video track clip item
+            v_clip = f"""          <clipitem id="video-clip-{i}">
+            <name>{xml.sax.saxutils.escape(clip_name)}</name>
+            <duration>{source_dur_frames}</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+            <in>{in_f}</in>
+            <out>{out_f}</out>
+            <start>{start_f}</start>
+            <end>{end_f}</end>
+            <file id="file-{file_index}">
+              <name>{xml.sax.saxutils.escape(clip_name)}</name>
+              <pathurl>{xml.sax.saxutils.escape(v_url)}</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+              <duration>{source_dur_frames}</duration>
+            </file>
+          </clipitem>"""
+            video_clips.append(v_clip)
+            
+            # Dialogue tracks clip items (if keep_audio is enabled)
+            if slot.keep_audio:
+                audio_clip_l = f"""          <clipitem id="audio-clip-{i}-l">
+            <name>{xml.sax.saxutils.escape(clip_name)}</name>
+            <duration>{source_dur_frames}</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+            <in>{in_f}</in>
+            <out>{out_f}</out>
+            <start>{start_f}</start>
+            <end>{end_f}</end>
+            <file id="file-{file_index}"/>
+          </clipitem>"""
+                dialogue_clips_l.append(audio_clip_l)
+                
+                audio_clip_r = f"""          <clipitem id="audio-clip-{i}-r">
+            <name>{xml.sax.saxutils.escape(clip_name)}</name>
+            <duration>{source_dur_frames}</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+            <in>{in_f}</in>
+            <out>{out_f}</out>
+            <start>{start_f}</start>
+            <end>{end_f}</end>
+            <file id="file-{file_index}"/>
+          </clipitem>"""
+                dialogue_clips_r.append(audio_clip_r)
+                
+        bgm_clip_l = f"""          <clipitem id="bgm-clip-l">
+            <name>{xml.sax.saxutils.escape(bgm_name)}</name>
+            <duration>{bgm_duration_frames}</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+            <in>0</in>
+            <out>{bgm_duration_frames}</out>
+            <start>0</start>
+            <end>{bgm_duration_frames}</end>
+            <file id="bgm-file">
+              <name>{xml.sax.saxutils.escape(bgm_name)}</name>
+              <pathurl>{xml.sax.saxutils.escape(bgm_url)}</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+              <duration>{bgm_duration_frames}</duration>
+            </file>
+          </clipitem>"""
+          
+        bgm_clip_r = f"""          <clipitem id="bgm-clip-r">
+            <name>{xml.sax.saxutils.escape(bgm_name)}</name>
+            <duration>{bgm_duration_frames}</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+            <in>0</in>
+            <out>{bgm_duration_frames}</out>
+            <start>0</start>
+            <end>{bgm_duration_frames}</end>
+            <file id="bgm-file"/>
+          </clipitem>"""
+          
+        video_clips_xml = "\n".join(video_clips)
+        dialogue_clips_l_xml = "\n".join(dialogue_clips_l)
+        dialogue_clips_r_xml = "\n".join(dialogue_clips_r)
+        
+        xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml SYSTEM "fcpxml.dtd">
+<xmeml version="5">
+  <sequence id="sequence-1">
+    <name>AI MV Premiere Project</name>
+    <duration>{bgm_duration_frames}</duration>
+    <rate>
+      <timebase>24</timebase>
+      <ntsc>TRUE</ntsc>
+    </rate>
+    <media>
+      <video>
+        <format>
+          <samplecharacteristics>
+            <width>1920</width>
+            <height>1080</height>
+            <pixelaspectratio>square</pixelaspectratio>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+          </samplecharacteristics>
+        </format>
+        <track>
+{video_clips_xml}
+        </track>
+      </video>
+      <audio>
+        <numChannels>4</numChannels>
+        <track>
+{bgm_clip_l}
+        </track>
+        <track>
+{bgm_clip_r}
+        </track>
+        <track>
+{dialogue_clips_l_xml}
+        </track>
+        <track>
+{dialogue_clips_r_xml}
+        </track>
+      </audio>
+    </media>
+  </sequence>
+</xmeml>
+"""
+        return Response(content=xml_content, media_type="application/xml")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

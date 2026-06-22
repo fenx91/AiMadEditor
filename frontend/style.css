@@ -1185,3 +1185,30 @@ body {
     font-weight: 500;
 }
 
+/* Fullscreen styles for video container & subtitles scaling */
+.video-container:fullscreen {
+    width: 100vw !important;
+    height: 100vh !important;
+    background: #000 !important;
+}
+
+.video-container:fullscreen #monitor-dialogue-overlay {
+    font-size: 42px !important;
+    top: 10% !important;
+    text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95) !important;
+}
+
+.video-container:fullscreen #monitor-lyric-overlay {
+    font-size: 34px !important;
+    bottom: 5% !important;
+    text-shadow: 0 0 8px rgba(0,0,0,0.95), 0 0 3px rgba(0,0,0,0.95) !important;
+}
+
+/* Hide native fullscreen button to prevent exiting fullscreen on video switch */
+video::-webkit-media-controls-fullscreen-button {
+    display: none !important;
+}
+video::-umd-media-controls-fullscreen-button {
+    display: none !important;
+}
+

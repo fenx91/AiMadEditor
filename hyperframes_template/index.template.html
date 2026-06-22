@@ -63,8 +63,9 @@
 
 <div id="viewport" data-composition-id="mv" data-width="1920" data-height="1080" data-start="0" data-duration="10.44">
     <!-- VIDEO_ELEMENTS_PLACEHOLDER -->
-    <!-- Subtitles Overlay -->
-    <div id="subtitles-container" style="position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 38px; font-weight: 700; font-family: 'Inter', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif; text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
+    <!-- Double Subtitles Overlay -->
+    <div id="dialogue-container" style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 42px; font-weight: 700; font-family: 'Inter', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif; text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
+    <div id="lyrics-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 34px; font-weight: 500; font-family: 'Inter', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif; text-shadow: 0 0 8px rgba(0,0,0,0.95), 0 0 3px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
 </div>
 <audio id="bg-audio" src="audio.mp3" data-start="0" data-duration="10.44" data-track-index="0" data-volume="1"></audio>
 
@@ -120,6 +121,7 @@
             const ext = renderData.audioPath.split('.').pop();
             audio.src = 'audio.' + ext;
             audio.load();
+            audio.volume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
         }
 
         // Retrieve static Video Elements from DOM
@@ -158,6 +160,22 @@
         document.getElementById('hud-time').textContent = time.toFixed(2) + 's';
         let seekPromise = Promise.resolve();
         
+        // Update BGM lyrics overlay dynamically
+        const lyricsDiv = document.getElementById('lyrics-container');
+        if (lyricsDiv) {
+            if (renderData.lyrics && renderData.lyrics.length > 0) {
+                const activeLyric = renderData.lyrics.find(l => time >= l.start && time < l.end);
+                if (activeLyric) {
+                    lyricsDiv.textContent = activeLyric.text;
+                    lyricsDiv.style.display = 'block';
+                } else {
+                    lyricsDiv.style.display = 'none';
+                }
+            } else {
+                lyricsDiv.style.display = 'none';
+            }
+        }
+        
         if (activeIndex !== -1) {
             const activeVideo = videoElements[activeIndex];
             const slot = renderData.slots[activeIndex];
@@ -167,23 +185,38 @@
             const filename = slot.videoPath.split(/[/\\]/).pop();
             document.getElementById('hud-clip').textContent = `CLIP: ${filename} (at ${clipTime.toFixed(2)}s)`;
             
-            // Update subtitles overlay dynamically
-            const subtitleDiv = document.getElementById('subtitles-container');
-            if (subtitleDiv) {
+            // Update dialogue subtitles overlay dynamically
+            const dialogueDiv = document.getElementById('dialogue-container');
+            if (dialogueDiv) {
                 if (slot.keepAudio && slot.transcript) {
-                    subtitleDiv.textContent = slot.transcript;
-                    subtitleDiv.style.display = 'block';
+                    dialogueDiv.textContent = slot.transcript;
+                    dialogueDiv.style.display = 'block';
+                    
+                    const speaker = (slot.speaker || '').toLowerCase();
+                    if (speaker === 'tayama') {
+                        dialogueDiv.style.color = '#00f2fe';
+                    } else if (speaker === 'sasaki') {
+                        dialogueDiv.style.color = '#ffcc00';
+                    } else if (speaker === 'yamada') {
+                        dialogueDiv.style.color = '#ff80bf';
+                    } else {
+                        dialogueDiv.style.color = '#ffffff';
+                    }
+                    dialogueDiv.style.textShadow = '0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95)';
                 } else {
-                    subtitleDiv.style.display = 'none';
+                    dialogueDiv.style.display = 'none';
                 }
             }
             
             // Handle raw video audio mix in
             if (slot.keepAudio) {
                 activeVideo.muted = false;
-                activeVideo.volume = 0.8;
+                activeVideo.volume = renderData.dialogueVolume !== undefined ? renderData.dialogueVolume : 1.0;
             } else {
                 activeVideo.muted = true;
+            }
+            if (audio) {
+                audio.volume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
             }
             
             // Sync current time of video
@@ -235,6 +268,17 @@
                 if (!v.paused) v.pause();
             });
             currentShowingIndex = -1;
+            
+            // Hide dialogue when outside slots
+            const dialogueDiv = document.getElementById('dialogue-container');
+            if (dialogueDiv) {
+                dialogueDiv.style.display = 'none';
+            }
+            
+            // Restore BGM volume
+            if (audio) {
+                audio.volume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
+            }
         }
         
         return seekPromise;
