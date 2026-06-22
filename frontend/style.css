@@ -135,7 +135,7 @@ body {
     min-width: 480px;
 }
 
-.indexing-panel input {
+.indexing-panel input[type="text"] {
     flex: 1;
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid var(--border-color);
@@ -148,12 +148,11 @@ body {
     transition: border-color 0.2s;
 }
 
-.indexing-panel input:focus {
+.indexing-panel input[type="text"]:focus {
     border-color: var(--color-primary);
     box-shadow: var(--neon-glow-primary);
 }
 
-/* Status Badge */
 .status-badge {
     display: flex;
     align-items: center;
@@ -163,6 +162,17 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     font-size: 12px;
+}
+
+.status-badge.clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.status-badge.clickable:hover {
+    background: rgba(0, 242, 254, 0.08);
+    border-color: var(--color-primary);
+    box-shadow: var(--neon-glow-primary);
 }
 
 .status-dot {
@@ -1098,3 +1108,80 @@ body {
 .lyric-slot-status.fallback {
     color: rgba(0, 242, 254, 0.85) !important;
 }
+
+/* Video & Transcript Browser Styles */
+.browser-video-item {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+    word-break: break-all;
+}
+
+.browser-video-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(0, 242, 254, 0.4);
+    color: #fff;
+}
+
+.browser-video-item.active {
+    background: rgba(0, 242, 254, 0.1);
+    border-color: var(--color-primary);
+    color: #fff;
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.15);
+}
+
+.browser-transcript-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.browser-transcript-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+.browser-transcript-item.playing {
+    background: rgba(0, 242, 254, 0.05);
+    border-color: rgba(0, 242, 254, 0.2);
+}
+
+.browser-transcript-time {
+    font-family: var(--font-mono);
+    color: var(--color-primary);
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(0, 242, 254, 0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.browser-transcript-text {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+    flex-grow: 1;
+    word-break: break-word;
+}
+
+.browser-transcript-item:hover .browser-transcript-text {
+    color: var(--text-primary);
+}
+
+.browser-transcript-item.playing .browser-transcript-text {
+    color: #fff;
+    font-weight: 500;
+}
+

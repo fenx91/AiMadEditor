@@ -39,3 +39,11 @@ hyperframes_template/index.html
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Environment credentials
+.env
+*.env
+.env.local
+
+# tmp file for developers
+tmp/

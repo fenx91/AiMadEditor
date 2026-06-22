@@ -1,3 +1,20 @@
+// Global error logging for debugging
+window.addEventListener('error', (e) => {
+    alert(`JS Error: ${e.message} at ${e.filename}:${e.lineno}:${e.colno}`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+    alert(`Unhandled Promise Rejection: ${e.reason}`);
+});
+
+function browserLog(msg) {
+    const consoleDiv = document.getElementById('browser-debug-console');
+    if (consoleDiv) {
+        consoleDiv.textContent += `\n[${new Date().toLocaleTimeString()}] ${msg}`;
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    }
+    console.log("[BrowserDebug]", msg);
+}
+
 // State variables
 let songData = null;
 let activeSlotIndex = null;
@@ -11,6 +28,11 @@ let isMuted = false;
 let lastPreviewSlotIndex = null;
 let activePlayer = null;
 let preloadPlayer = null;
+let scriptPlan = null;
+let currentBrowserVideoId = null;
+let currentBrowserTranscripts = [];
+let currentBrowserSegments = [];
+let currentBrowserTab = 'transcripts';
 
 // DOM elements
 const el = {
@@ -87,7 +109,41 @@ const el = {
     manualVideoSelect: document.getElementById('manual-video-select'),
     manualClipStart: document.getElementById('manual-clip-start'),
     manualAssignBtn: document.getElementById('manual-assign-btn'),
-    searchQueryInput: document.getElementById('search-query-input')
+    searchQueryInput: document.getElementById('search-query-input'),
+    
+    // Tabbed Script Planner Controls
+    tabPlannerBtn: document.getElementById('tab-planner-btn'),
+    tabMatcherBtn: document.getElementById('tab-matcher-btn'),
+    panelPlannerContent: document.getElementById('panel-planner-content'),
+    panelMatcherContent: document.getElementById('panel-matcher-content'),
+    userVisionInput: document.getElementById('user-vision-input'),
+    generateScriptBtn: document.getElementById('generate-script-btn'),
+    regenerateScriptBtn: document.getElementById('regenerate-script-btn'),
+    scriptStatusBadge: document.getElementById('script-status-badge'),
+    scriptLinesList: document.getElementById('script-lines-list'),
+    applyScriptContainer: document.getElementById('apply-script-container'),
+    applyScriptBtn: document.getElementById('apply-script-btn'),
+    scriptHighLevelPanel: document.getElementById('script-high-level-panel'),
+    toggleHighLevelBtn: document.getElementById('toggle-high-level-btn'),
+    highLevelContent: document.getElementById('high-level-content'),
+    
+    // Recommended story vision elements
+    recommendedVisionsContainer: document.getElementById('recommended-visions-container'),
+    recommendedVisionsList: document.getElementById('recommended-visions-list'),
+    visionsLoading: document.getElementById('visions-loading'),
+    
+    // Modal Cancel Buttons
+    modalRunningActions: document.getElementById('modal-running-actions'),
+    modalCancelBtn: document.getElementById('modal-cancel-btn'),
+    
+    // Video Browser Modal Controls
+    videoBrowserModal: document.getElementById('video-browser-modal'),
+    videoBrowserCloseBtn: document.getElementById('video-browser-close-btn'),
+    browserVideoList: document.getElementById('browser-video-list'),
+    browserPreviewPlayer: document.getElementById('browser-preview-player'),
+    browserPlayerPlaceholder: document.getElementById('browser-player-placeholder'),
+    browserTranscriptCount: document.getElementById('browser-transcript-count'),
+    browserTranscriptList: document.getElementById('browser-transcript-list')
 };
 
 // Check backend status and fetch video pool on startup
@@ -123,8 +179,34 @@ function updateModelStatus(ok, text) {
 function updateVolume() {
     const targetVolume = isMuted ? 0 : currentVolume;
     audioEl.volume = targetVolume;
-    if (el.previewPlayerA) el.previewPlayerA.muted = true; // Ensure the preview video itself is always muted
-    if (el.previewPlayerB) el.previewPlayerB.muted = true;
+    // Dynamically sync active preview player's volume and muted state based on keep_audio status
+    if (activePlayer) {
+        let shouldKeepAudio = false;
+        if (isPlaying) {
+            const curr = audioEl.currentTime;
+            if (songData) {
+                const activeIndex = songData.lyrics.findIndex(l => curr >= l.start && curr < l.end);
+                const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex) : null;
+                if (effective && !effective.isFallback && effective.keep_audio) {
+                    shouldKeepAudio = true;
+                }
+            }
+        } else {
+            if (activeSlotIndex !== null && timelineSlots[activeSlotIndex]) {
+                if (timelineSlots[activeSlotIndex].keep_audio) {
+                    shouldKeepAudio = true;
+                }
+            }
+        }
+        
+        if (shouldKeepAudio && !isMuted) {
+            activePlayer.muted = false;
+            activePlayer.volume = targetVolume * 0.8;
+        } else {
+            activePlayer.muted = true;
+        }
+    }
+    if (preloadPlayer) preloadPlayer.muted = true;
     
     // Update mute button icon
     if (isMuted || targetVolume === 0) {
@@ -229,7 +311,8 @@ function refreshTimelineBlocks() {
             if (activeSlotIndex === i) {
                 block.classList.add('active');
             }
-            block.innerHTML = `<strong>${slot.video_name}</strong> (从 ${slot.clip_start.toFixed(1)}s)`;
+            const micBadge = slot.keep_audio ? '<span class="mic-badge" style="font-size: 10px; margin-right: 4px; padding: 1px 3px; background: rgba(0, 242, 254, 0.2); border: 1px solid rgba(0, 242, 254, 0.4); border-radius: 3px;" title="已启用原声混合">🎙️</span>' : '';
+            block.innerHTML = `${micBadge}<strong>${slot.video_name}</strong> (从 ${slot.clip_start.toFixed(1)}s)`;
             
             const statusText = document.getElementById(`lyric-slot-status-${i}`);
             if (statusText) {
@@ -361,6 +444,69 @@ function setupEventListeners() {
     el.clearSlotBtn.addEventListener('click', clearActiveSlot);
     el.autoMatchAllBtn.addEventListener('click', autoMatchAllSlots);
 
+    // Video Browser Modal event handlers
+    el.modelStatus.addEventListener('click', openVideoBrowser);
+    el.videoBrowserCloseBtn.addEventListener('click', closeVideoBrowser);
+    el.videoBrowserModal.addEventListener('click', (e) => {
+        if (e.target === el.videoBrowserModal) {
+            closeVideoBrowser();
+        }
+    });
+
+    // Video Browser Tabs
+    const tabTranscriptsBtn = document.getElementById('browser-tab-transcripts-btn');
+    const tabSegmentsBtn = document.getElementById('browser-tab-segments-btn');
+    if (tabTranscriptsBtn) {
+        tabTranscriptsBtn.addEventListener('click', () => switchBrowserTab('transcripts'));
+    }
+    if (tabSegmentsBtn) {
+        tabSegmentsBtn.addEventListener('click', () => switchBrowserTab('segments'));
+    }
+
+    // Event delegation for browser video list clicks
+    const browserVideoList = document.getElementById('browser-video-list');
+    if (browserVideoList) {
+        browserVideoList.addEventListener('click', async (e) => {
+            const item = e.target.closest('.browser-video-item');
+            browserLog(`browser-video-list click event captured. Target tag: <${e.target.tagName}>, classes: "${e.target.className}", item found: ${item ? "yes" : "no"}`);
+            if (!item) return;
+            
+            const index = Array.from(browserVideoList.querySelectorAll('.browser-video-item')).indexOf(item);
+            browserLog(`Clicked video item index: ${index}`);
+            if (index === -1) return;
+            
+            const video = allIndexedVideos[index];
+            if (!video) {
+                browserLog("ERROR: No video object found in allIndexedVideos for index " + index);
+                return;
+            }
+            
+            try {
+                // Clear active styles from all video items
+                browserVideoList.querySelectorAll('.browser-video-item').forEach(elItem => {
+                    elItem.classList.remove('active');
+                    elItem.style.background = 'rgba(255, 255, 255, 0.02)';
+                    elItem.style.borderColor = 'var(--border-color)';
+                    elItem.style.color = 'var(--text-secondary)';
+                    elItem.style.boxShadow = 'none';
+                });
+                
+                // Set active styles for the clicked item
+                item.classList.add('active');
+                item.style.background = 'rgba(0, 242, 254, 0.1)';
+                item.style.borderColor = 'var(--color-primary)';
+                item.style.color = '#fff';
+                item.style.boxShadow = '0 0 8px rgba(0, 242, 254, 0.15)';
+                
+                browserLog(`Triggering selectBrowserVideo for ID: ${video.id}`);
+                await selectBrowserVideo(video);
+            } catch (err) {
+                browserLog("EXCEPTION inside video list click handler: " + err.message);
+                alert("选择视频出错: " + err.message);
+            }
+        });
+    }
+
     // Trimmer Numerical Inputs & Adjustment Buttons
     if (el.trimmerInput) {
         el.trimmerInput.addEventListener('input', () => {
@@ -466,6 +612,41 @@ function setupEventListeners() {
     if (el.manualAssignBtn) {
         el.manualAssignBtn.addEventListener('click', manualAssignVideo);
     }
+    
+    // Tab switching event listeners
+    if (el.tabPlannerBtn && el.tabMatcherBtn) {
+        el.tabPlannerBtn.addEventListener('click', () => switchTab('planner'));
+        el.tabMatcherBtn.addEventListener('click', () => switchTab('matcher'));
+    }
+    
+    // Generate script plan
+    if (el.generateScriptBtn) {
+        el.generateScriptBtn.addEventListener('click', () => generateScriptPlan(false));
+    }
+    
+    // Reset cache and regenerate
+    if (el.regenerateScriptBtn) {
+        el.regenerateScriptBtn.addEventListener('click', () => generateScriptPlan(true));
+    }
+    
+    // Apply script plan
+    if (el.applyScriptBtn) {
+        el.applyScriptBtn.addEventListener('click', applyScriptAndMatchAll);
+    }
+    
+    // Toggle high level story panel visibility
+    if (el.toggleHighLevelBtn && el.highLevelContent) {
+        el.toggleHighLevelBtn.addEventListener('click', () => {
+            const isHidden = el.highLevelContent.style.display === 'none';
+            if (isHidden) {
+                el.highLevelContent.style.display = 'flex';
+                el.toggleHighLevelBtn.textContent = '收起';
+            } else {
+                el.highLevelContent.style.display = 'none';
+                el.toggleHighLevelBtn.textContent = '展开';
+            }
+        });
+    }
 }
 
 function setupDragAndDrop(box, input, display) {
@@ -515,7 +696,6 @@ function appendModalLog(log) {
     el.modalLogConsole.scrollTop = el.modalLogConsole.scrollHeight;
 }
 
-// 1. Index Directory
 async function indexDirectory() {
     const dir = el.indexDirInput.value.trim();
     if (!dir) return alert("请输入合法的绝对路径！");
@@ -523,6 +703,13 @@ async function indexDirectory() {
     showModal("🔍 索引本地视频中", `扫描目录: ${dir}...`);
     appendModalLog(`开始扫描并索引视频于: ${dir}`);
     appendModalLog(`提取关键帧并使用本地 CLIP 模型推理特征可能需要几分钟，请耐心等待...`);
+
+    const forceRefreshCheckbox = document.getElementById('force-refresh-cache');
+    const forceRefresh = forceRefreshCheckbox ? forceRefreshCheckbox.checked : false;
+    
+    if (forceRefresh) {
+        appendModalLog(`提示：用户开启了“强制刷新缓存”，将清空该目录下的数据库缓存并完全重做索引特征与转写。`);
+    }
     
     updateModalProgress(20, "后端解析视频帧特征中...");
     
@@ -530,7 +717,7 @@ async function indexDirectory() {
         const res = await fetch('/api/index_videos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ directory: dir })
+            body: JSON.stringify({ directory: dir, force_refresh: forceRefresh })
         });
         
         const data = await res.json();
@@ -613,6 +800,11 @@ async function processMusic() {
             
             // Enable auto-match button
             el.autoMatchAllBtn.removeAttribute('disabled');
+            if (el.generateScriptBtn) el.generateScriptBtn.removeAttribute('disabled');
+            if (el.regenerateScriptBtn) el.regenerateScriptBtn.removeAttribute('disabled');
+            
+            // Fetch AI story vision recommendations based on lyrics and DB video content
+            fetchStoryVisionRecommendations();
             
             // Setup Trimmer UI
             el.audioTrimmerCard.style.display = 'block';
@@ -702,6 +894,8 @@ async function trimMusic() {
             
             // Enable auto-match button
             el.autoMatchAllBtn.removeAttribute('disabled');
+            if (el.generateScriptBtn) el.generateScriptBtn.removeAttribute('disabled');
+            if (el.regenerateScriptBtn) el.regenerateScriptBtn.removeAttribute('disabled');
             
             setTimeout(() => {
                 el.modalOverlay.style.display = 'none';
@@ -872,6 +1066,15 @@ function updateGlobalPreview(curr) {
         // Ensure active player has target source loaded and is visible
         switchActivePlayer(effective.proxy_url, effective.clip_start);
         
+        // Sync unmuting based on keep_audio
+        const targetVolume = isMuted ? 0 : currentVolume;
+        if (effective.keep_audio && !effective.isFallback && !isMuted) {
+            activePlayer.muted = false;
+            activePlayer.volume = targetVolume * 0.8;
+        } else {
+            activePlayer.muted = true;
+        }
+        
         // Calculate the target time in the video
         const clipTime = effective.clip_start + (curr - songData.lyrics[activeIndex].start);
         
@@ -1004,6 +1207,14 @@ function selectSlot(index) {
     // Reset/Clear the custom search input on slot change so it doesn't leak
     if (el.searchQueryInput) {
         el.searchQueryInput.value = "";
+        if (scriptPlan && scriptPlan[index]) {
+            el.searchQueryInput.placeholder = `AI大纲提示词: ${scriptPlan[index].visual_prompt}`;
+            if (el.motionPreference && scriptPlan[index].motion_preference) {
+                el.motionPreference.value = scriptPlan[index].motion_preference;
+            }
+        } else {
+            el.searchQueryInput.placeholder = "留空默认使用当前歌词语义进行匹配...";
+        }
     }
     
     // Sync manual video and timestamp selection controls
@@ -1075,6 +1286,16 @@ function updatePreviewPlayerForSlot(index) {
         
         // Load video proxy in active player
         switchActivePlayer(slot.proxy_url, slot.clip_start);
+        
+        // Sync unmuting based on keep_audio
+        const targetVolume = isMuted ? 0 : currentVolume;
+        if (slot.keep_audio && !isMuted) {
+            activePlayer.muted = false;
+            activePlayer.volume = targetVolume * 0.8;
+        } else {
+            activePlayer.muted = true;
+        }
+        
         activePlayer.currentTime = slot.clip_start;
         activePlayer.pause();
     } else {
@@ -1088,6 +1309,7 @@ function updatePreviewPlayerForSlot(index) {
             el.clipTrimmer.style.display = 'none';
             
             switchActivePlayer(effective.proxy_url, effective.clip_start);
+            activePlayer.muted = true; // Fallbacks are always muted
             activePlayer.currentTime = effective.clip_start;
             activePlayer.pause();
         } else {
@@ -1138,7 +1360,14 @@ async function findMatches() {
     if (activeSlotIndex === null || !songData) return;
     
     const lyric = songData.lyrics[activeSlotIndex];
-    let text = el.searchQueryInput && el.searchQueryInput.value.trim() ? el.searchQueryInput.value.trim() : lyric.text;
+    let text = el.searchQueryInput && el.searchQueryInput.value.trim() ? el.searchQueryInput.value.trim() : null;
+    if (!text) {
+        if (scriptPlan && scriptPlan[activeSlotIndex] && scriptPlan[activeSlotIndex].visual_prompt) {
+            text = scriptPlan[activeSlotIndex].visual_prompt;
+        } else {
+            text = lyric.text;
+        }
+    }
     const motion = el.motionPreference.value;
     
     el.candidatesList.innerHTML = `
@@ -1156,7 +1385,10 @@ async function findMatches() {
             body: JSON.stringify({
                 lyric_text: text,
                 motion_preference: motion,
-                limit: 5
+                limit: 5,
+                lyric: lyric ? lyric.text : "",
+                narrative_concept: (scriptPlan && scriptPlan[activeSlotIndex]) ? (scriptPlan[activeSlotIndex].narrative_concept || "") : "",
+                emotional_tone: (scriptPlan && scriptPlan[activeSlotIndex]) ? (scriptPlan[activeSlotIndex].emotional_tone || "") : ""
             })
         });
         
@@ -1183,31 +1415,78 @@ function renderCandidatesList(candidates) {
     candidates.forEach((cand, idx) => {
         const card = document.createElement('div');
         card.className = 'candidate-card';
+        card.style.cssText = "display: flex; flex-direction: column; gap: 6px; padding: 10px;";
         
         const scorePct = Math.round(cand.similarity * 100);
         const fileName = cand.video_path.split('/').pop();
+        const hasSeg = !!cand.segment;
         
         card.innerHTML = `
-            <div class="cand-badge">#${idx+1} Match</div>
-            <div class="candidate-thumbnail">
-                <img src="${cand.frame_url}" alt="keyframe" />
-            </div>
-            <div class="candidate-meta">
-                <div class="cand-name" title="${fileName}">${fileName}</div>
-                <div class="cand-stats">
-                    <span class="cand-score">${scorePct}% 匹配度</span>
-                    <span class="cand-motion">运动度: ${cand.motion_score.toFixed(1)}</span>
+            <div style="display: flex; gap: 10px; width: 100%; align-items: flex-start; justify-content: space-between; position: relative;">
+                <div class="cand-badge" style="position: static; margin-bottom: 4px;">#${idx+1} Match</div>
+                ${hasSeg ? `
+                <div class="ai-badge" style="font-size: 9px; padding: 2px 6px; background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color: #000; border-radius: 4px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 2px;" title="Gemini 多模态深度场景分析已生成">
+                    ✨ AI 场景
                 </div>
-                <div class="cand-stats">
-                    <span class="cand-time">定位点: ${cand.timestamp.toFixed(1)}s</span>
-                    <button class="btn btn-primary" style="font-size:10px; padding:3px 8px; border-radius:4px;">采用</button>
+                ` : ''}
+            </div>
+            
+            <div style="display: flex; gap: 10px; width: 100%; align-items: center;">
+                <div class="candidate-thumbnail">
+                    <img src="${cand.frame_url}" alt="keyframe" />
+                </div>
+                <div class="candidate-meta" style="flex: 1; min-width: 0;">
+                    <div class="cand-name" title="${fileName}">${fileName}</div>
+                    <div class="cand-stats">
+                        <span class="cand-score">${scorePct}% 匹配度</span>
+                        <span class="cand-motion">运动度: ${cand.motion_score.toFixed(1)}</span>
+                    </div>
+                    <div class="cand-stats">
+                        <span class="cand-time">定位点: ${cand.timestamp.toFixed(1)}s</span>
+                        <div style="display: flex; gap: 6px;">
+                            ${hasSeg ? `<button class="btn btn-secondary ai-toggle-btn" style="font-size:10px; padding:3px 8px; border-radius:4px; border-color: rgba(0, 242, 254, 0.3); color: var(--color-primary);">AI 分析</button>` : ''}
+                            <button class="btn btn-primary use-btn" style="font-size:10px; padding:3px 8px; border-radius:4px;">采用</button>
+                        </div>
+                    </div>
+                    ${cand.transcript_text ? `
+                    <div class="cand-transcript" style="font-size: 10px; color: var(--color-primary); background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 4px; padding: 4px 6px; margin-top: 6px; display: flex; align-items: center; gap: 4px; line-height: 1.2;">
+                        <span>💬</span>
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;" title="台词: ${cand.transcript_text} (相似度: ${Math.round(cand.transcript_similarity * 100)}%)">"${cand.transcript_text}"</span>
+                    </div>
+                    ` : ''}
                 </div>
             </div>
+            
+            ${hasSeg ? `
+            <div class="ai-details-panel" style="display: none; background: rgba(0, 242, 254, 0.03); border: 1px solid rgba(0, 242, 254, 0.12); border-radius: 6px; padding: 10px; margin-top: 4px; font-size: 11px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; line-height: 1.4;">
+                <div style="color: #fff; font-weight: 600; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 4px; margin-bottom: 2px;">
+                    <span>✨ Gemini 多模态联合理解</span>
+                    <span style="font-family: monospace; font-size: 10px; color: var(--color-primary);">区间: ${cand.segment.start_time.toFixed(1)}s - ${cand.segment.end_time.toFixed(1)}s</span>
+                </div>
+                <div><strong>🎬 画面描述:</strong> <span style="color: #eee;">${cand.segment.summary || '无'}</span></div>
+                <div><strong>🎨 视觉风格:</strong> <span style="color: #eee;">${cand.segment.visual_style || '无'}</span></div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div><strong>🕺 运动强度:</strong> <span style="color: var(--color-primary);">${cand.segment.motion_intensity === 'high' ? '🔥 高' : cand.segment.motion_intensity === 'medium' ? '⚡ 中' : '❄️ 低'}</span></div>
+                    <div><strong>❤️ 情感起伏:</strong> <span style="color: #eee;">${cand.segment.emotion_flow || '无'}</span></div>
+                </div>
+                <div>
+                    <strong>🏷️ 标签:</strong>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+                        ${cand.segment.tags.map(t => `<span style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 1px 4px; font-size: 9px; color: #ccc;">${t}</span>`).join('')}
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px;">
+                    <button class="btn btn-secondary play-segment-btn" style="font-size: 9px; padding: 2px 6px; border-radius: 3px; display: flex; align-items: center; gap: 2px;">
+                        ▶ 播放当前分析片段
+                    </button>
+                </div>
+            </div>
+            ` : ''}
         `;
         
-        // Clicking card previews the proxy video starting at the keyframe time
+        // Clicking card previews the proxy video starting at the keyframe time (unless clicking buttons/AI details)
         card.addEventListener('click', (e) => {
-            if (e.target.tagName !== 'BUTTON') {
+            if (e.target.tagName !== 'BUTTON' && !e.target.closest('.ai-details-panel') && !e.target.closest('.ai-badge') && !e.target.closest('.ai-toggle-btn')) {
                 el.videoPlaceholder.style.display = 'none';
                 el.monitorVideoName.textContent = fileName;
                 
@@ -1217,8 +1496,48 @@ function renderCandidatesList(candidates) {
             }
         });
         
+        // Toggle AI details panel
+        if (hasSeg) {
+            const aiBtn = card.querySelector('.ai-toggle-btn');
+            const aiBadge = card.querySelector('.ai-badge');
+            const detailsPanel = card.querySelector('.ai-details-panel');
+            
+            detailsPanel.style.display = 'none';
+            
+            const toggleDetails = (evt) => {
+                evt.stopPropagation();
+                if (detailsPanel.style.display === 'none') {
+                    detailsPanel.style.display = 'flex';
+                    if (aiBtn) aiBtn.textContent = '收起分析';
+                } else {
+                    detailsPanel.style.display = 'none';
+                    if (aiBtn) aiBtn.textContent = 'AI 分析';
+                }
+            };
+            
+            if (aiBtn) aiBtn.addEventListener('click', toggleDetails);
+            if (aiBadge) aiBadge.addEventListener('click', toggleDetails);
+            
+            // Play segment button logic
+            const playSegBtn = card.querySelector('.play-segment-btn');
+            if (playSegBtn) {
+                playSegBtn.addEventListener('click', (evt) => {
+                    evt.stopPropagation();
+                    el.videoPlaceholder.style.display = 'none';
+                    el.monitorVideoName.textContent = fileName;
+                    
+                    switchActivePlayer(cand.proxy_url, Math.max(0, cand.segment.start_time));
+                    activePlayer.currentTime = Math.max(0, cand.segment.start_time);
+                    activePlayer.play().catch(() => {});
+                    
+                    browserLog(`Playing Gemini segment from ${cand.segment.start_time.toFixed(1)}s to ${cand.segment.end_time.toFixed(1)}s`);
+                });
+            }
+        }
+        
         // Clicking "Use" button assigns the candidate to the active slot
-        card.querySelector('button').addEventListener('click', () => {
+        card.querySelector('.use-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
             assignCandidateToActiveSlot(cand);
         });
         
@@ -1237,17 +1556,30 @@ function assignCandidateToActiveSlot(cand) {
     // clip_start starts at keyframe timestamp, but make sure we don't exceed video duration
     const clip_start = Math.max(0, cand.timestamp);
     
+    const transcript = (cand.segment && cand.segment.transcript) ? cand.segment.transcript : "";
+    let keep_audio = false;
+    if (transcript && cand.segment) {
+        const score = cand.segment.mad_score || 5;
+        const type = cand.segment.scene_type || "";
+        if (type === "emotional" || score >= 8) {
+            keep_audio = true;
+        }
+    }
+    
     timelineSlots[activeSlotIndex] = {
         video_path: cand.video_path,
         video_name: fileName,
         proxy_url: cand.proxy_url,
         clip_start: clip_start,
         clip_duration: duration,
-        video_duration: cand.duration
+        video_duration: cand.duration,
+        transcript: transcript,
+        keep_audio: keep_audio
     };
     
     // Refresh all blocks on the timeline
     refreshTimelineBlocks();
+    renderScriptOutline();
     
     // Update Monitor / Previews
     updatePreviewPlayerForSlot(activeSlotIndex);
@@ -1289,104 +1621,199 @@ function clearActiveSlot() {
 async function autoMatchAllSlots() {
     if (!songData) return;
     
+    let isCancelled = false;
+    
+    // Set up cancellation event handler
+    el.modalCancelBtn.onclick = () => {
+        isCancelled = true;
+        appendModalLog("⚠️ 正在取消匹配任务...");
+    };
+    
     showModal("🤖 一键智能卡点匹配", "正在分析所有卡点并匹配最佳画面...");
+    // Show cancel button, hide close button
+    el.modalRunningActions.style.display = 'flex';
+    el.modalFooter.style.display = 'none';
+    
     appendModalLog(`开始对 ${songData.lyrics.length} 个卡点执行智能匹配...`);
     
     const motion = el.motionPreference.value;
     let successCount = 0;
     
+    // 1. Gather all empty slot indices
+    const emptySlotIndices = [];
     for (let i = 0; i < songData.lyrics.length; i++) {
-        const lyric = songData.lyrics[i];
-        
-        // Skip slots that are already filled to preserve user's choices
-        if (timelineSlots[i] !== null) {
+        if (timelineSlots[i] === null) {
+            emptySlotIndices.push(i);
+        } else {
             appendModalLog(`卡点 #${i+1} [已存在素材]: 跳过`);
-            continue;
         }
+    }
+    
+    if (emptySlotIndices.length === 0) {
+        appendModalLog("所有卡点均已存在素材，无需匹配。");
+        updateModalProgress(100, "智能匹配完成！无须更新。");
+        el.modalRunningActions.style.display = 'none';
+        el.modalFooter.style.display = 'block';
+        return;
+    }
+    
+    // 2. Chunk indices into batches of 20
+    const chunkSize = 20;
+    const chunks = [];
+    for (let i = 0; i < emptySlotIndices.length; i += chunkSize) {
+        chunks.push(emptySlotIndices.slice(i, i + chunkSize));
+    }
+    
+    appendModalLog(`共需匹配 ${emptySlotIndices.length} 个槽位，分 ${chunks.length} 批次并行处理...`);
+    
+    try {
+        let completedChunksCount = 0;
         
-        const progressPct = Math.round((i / songData.lyrics.length) * 100);
-        updateModalProgress(progressPct, `正在匹配卡点 #${i+1}/${songData.lyrics.length}: "${lyric.text}"`);
-        
-        // Collect video paths of the previous 4 slots to avoid repeats
-        const recentlyUsedPaths = [];
-        const lookbackWindow = 4;
-        for (let j = Math.max(0, i - lookbackWindow); j < i; j++) {
-            const eff = getEffectiveSlot(j);
-            if (eff && eff.video_path) {
-                recentlyUsedPaths.push(eff.video_path);
-            }
-        }
-        
-        try {
-            const res = await fetch('/api/match', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    lyric_text: lyric.text,
-                    motion_preference: motion,
-                    limit: 5 // Get top 5 matches to allow deduplication fallback
-                })
+        const chunkPromises = chunks.map(async (chunk, chunkIdx) => {
+            if (isCancelled) return;
+            
+            // Build request items for this chunk
+            const items = chunk.map(idx => {
+                const lyric = songData.lyrics[idx];
+                let promptText = lyric.text;
+                let motionPref = motion;
+                let concept = "";
+                let tone = "";
+                if (scriptPlan && scriptPlan[idx]) {
+                    promptText = scriptPlan[idx].visual_prompt || lyric.text;
+                    motionPref = scriptPlan[idx].motion_preference || motion;
+                    concept = scriptPlan[idx].narrative_concept || "";
+                    tone = scriptPlan[idx].emotional_tone || "";
+                }
+                return {
+                    index: idx,
+                    lyric_text: promptText,
+                    motion_preference: motionPref,
+                    lyric: lyric ? lyric.text : "",
+                    narrative_concept: concept,
+                    emotional_tone: tone
+                };
             });
             
-            if (res.ok) {
-                const candidates = await res.json();
+            // Fetch batch match API
+            const res = await fetch('/api/batch_match', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items })
+            });
+            
+            if (isCancelled) return;
+            
+            if (!res.ok) {
+                throw new Error(`批次 #${chunkIdx + 1} 请求失败: ${res.status}`);
+            }
+            
+            const batchResults = await res.json();
+            if (isCancelled) return;
+            
+            // Process the matched results for each index in the chunk
+            for (const idx of chunk) {
+                if (isCancelled) break;
+                
+                const lyric = songData.lyrics[idx];
+                const candidates = batchResults[idx];
+                
+                // Collect video paths of the previous 4 slots to avoid repeats
+                const recentlyUsedPaths = [];
+                const lookbackWindow = 4;
+                for (let j = Math.max(0, idx - lookbackWindow); j < idx; j++) {
+                    const eff = getEffectiveSlot(j);
+                    if (eff && eff.video_path) {
+                        recentlyUsedPaths.push(eff.video_path);
+                    }
+                }
+                
                 if (candidates && candidates.length > 0) {
-                    // Find the best candidate based on tiered matching rules:
                     let selectedCand = null;
                     
-                    // Tier 1: No overlap AND not recently used in sliding lookback window
+                    // Tier 1: No overlap AND not recently used
                     for (const cand of candidates) {
-                        if (!recentlyUsedPaths.includes(cand.video_path) && !hasVideoOverlap(cand, i)) {
+                        if (!recentlyUsedPaths.includes(cand.video_path) && !hasVideoOverlap(cand, idx)) {
                             selectedCand = cand;
                             break;
                         }
                     }
                     
-                    // Tier 2: No overlap (allow adjacent repeat if playing separate non-overlapping frames)
+                    // Tier 2: No overlap
                     if (!selectedCand) {
                         for (const cand of candidates) {
-                            if (!hasVideoOverlap(cand, i)) {
+                            if (!hasVideoOverlap(cand, idx)) {
                                 selectedCand = cand;
-                                appendModalLog(`卡点 #${i+1}: 采用最近使用的视频，但选择无画面重叠的片段`);
+                                appendModalLog(`卡点 #${idx+1}: 采用最近使用的视频，但选择无画面重叠的片段`);
                                 break;
                             }
                         }
                     }
                     
-                    // Tier 3: Fallback to absolute best match if all candidates overlap
+                    // Tier 3: Fallback
                     if (!selectedCand) {
                         selectedCand = candidates[0];
-                        appendModalLog(`卡点 #${i+1}: 所有候选画面均有时间轴重叠，执行首选兜底`);
+                        appendModalLog(`卡点 #${idx+1}: 所有候选画面均有时间轴重叠，执行首选兜底`);
                     }
                     
                     const duration = lyric.end - lyric.start;
                     const fileName = selectedCand.video_path.split('/').pop();
                     const clip_start = Math.max(0, selectedCand.timestamp);
                     
-                    timelineSlots[i] = {
+                    const transcript = (selectedCand.segment && selectedCand.segment.transcript) ? selectedCand.segment.transcript : "";
+                    let keep_audio = false;
+                    if (transcript && selectedCand.segment) {
+                        const score = selectedCand.segment.mad_score || 5;
+                        const type = selectedCand.segment.scene_type || "";
+                        if (type === "emotional" || score >= 8) {
+                            keep_audio = true;
+                        }
+                    }
+                    
+                    timelineSlots[idx] = {
                         video_path: selectedCand.video_path,
                         video_name: fileName,
                         proxy_url: selectedCand.proxy_url,
                         clip_start: clip_start,
                         clip_duration: duration,
-                        video_duration: selectedCand.duration
+                        video_duration: selectedCand.duration,
+                        transcript: transcript,
+                        keep_audio: keep_audio
                     };
                     successCount++;
-                    appendModalLog(`卡点 #${i+1} 匹配成功: -> ${fileName} (从 ${clip_start.toFixed(1)}s)`);
+                    appendModalLog(`卡点 #${idx+1} 匹配成功: -> ${fileName} (从 ${clip_start.toFixed(1)}s)`);
                 } else {
-                    appendModalLog(`卡点 #${i+1} 匹配失败: 视频库中未找到候选片段`);
+                    appendModalLog(`卡点 #${idx+1} 匹配失败: 未找到候选片段`);
                 }
-            } else {
-                appendModalLog(`卡点 #${i+1} 匹配错误: 服务器返回 ${res.status}`);
             }
-        } catch (e) {
-            appendModalLog(`卡点 #${i+1} 匹配异常: ${e.message}`);
+            
+            completedChunksCount++;
+            const progressPct = Math.round((completedChunksCount / chunks.length) * 100);
+            updateModalProgress(progressPct, `正在处理匹配结果... (${completedChunksCount}/${chunks.length} 批次)`);
+        });
+        
+        await Promise.all(chunkPromises);
+        
+        if (isCancelled) {
+            appendModalLog("❌ 一键智能匹配任务已被取消。");
+            updateModalProgress(0, "已取消匹配任务");
+            el.modalRunningActions.style.display = 'none';
+            el.modalFooter.style.display = 'block';
+            return;
         }
+        
+        updateModalProgress(100, `智能匹配完成！成功填充 ${successCount} 个卡点`);
+        appendModalLog(`--- 一键智能匹配完成 ---`);
+        appendModalLog(`成功匹配: ${successCount} 个卡点`);
+        
+    } catch (err) {
+        appendModalLog(`一键匹配发生错误: ${err.message}`);
+        updateModalProgress(0, "匹配出错");
+    } finally {
+        // Hide cancel actions, show close button
+        el.modalRunningActions.style.display = 'none';
+        el.modalFooter.style.display = 'block';
     }
-    
-    updateModalProgress(100, `智能匹配完成！成功填充 ${successCount} 个卡点`);
-    appendModalLog(`--- 一键智能匹配完成 ---`);
-    appendModalLog(`成功匹配: ${successCount} 个卡点`);
     
     // Refresh timeline and footer stats
     refreshTimelineBlocks();
@@ -1395,16 +1822,12 @@ async function autoMatchAllSlots() {
     // If a slot is currently active, update its preview
     if (activeSlotIndex !== null) {
         updatePreviewPlayerForSlot(activeSlotIndex);
-        
-        // Update cancel button visibility
         if (timelineSlots[activeSlotIndex]) {
             el.clearSlotBtn.style.display = 'block';
         } else {
             el.clearSlotBtn.style.display = 'none';
         }
     }
-    
-    el.modalFooter.style.display = 'block';
 }
 
 // 4. Render Video
@@ -1426,7 +1849,9 @@ async function renderVideo() {
                 end_time: lyric.end,
                 video_path: effective.video_path,
                 clip_start: effective.clip_start,
-                clip_duration: lyric.end - lyric.start
+                clip_duration: lyric.end - lyric.start,
+                keep_audio: effective.isFallback ? false : (effective.keep_audio || false),
+                transcript: effective.isFallback ? "" : (effective.transcript || "")
             });
         }
     }
@@ -1553,7 +1978,9 @@ function manualAssignVideo() {
         proxy_url: proxyUrl,
         clip_start: clipStart,
         clip_duration: duration,
-        video_duration: videoDuration
+        video_duration: videoDuration,
+        transcript: "",
+        keep_audio: false
     };
     
     // Refresh timeline blocks, stats, and monitor preview
@@ -1630,7 +2057,7 @@ function preloadVideo(src, time) {
 
 async function preloadTestData() {
     try {
-        console.log("Preloading test data...");
+        console.log("[v3] Preloading test data...");
         // Show status in UI or upload labels
         el.audioName.textContent = "Adam Lambert - Whataya Want from Me_H.mp3 (加载中...)";
         el.lyricName.textContent = "Adam Lambert - Whataya Want from Me_H.lrc (加载中...)";
@@ -1660,6 +2087,11 @@ async function preloadTestData() {
             
             // Enable auto-match button
             el.autoMatchAllBtn.removeAttribute('disabled');
+            if (el.generateScriptBtn) el.generateScriptBtn.removeAttribute('disabled');
+            if (el.regenerateScriptBtn) el.regenerateScriptBtn.removeAttribute('disabled');
+            
+            // Fetch AI story vision recommendations based on lyrics and DB video content
+            fetchStoryVisionRecommendations();
             
             // Setup Trimmer UI
             el.audioTrimmerCard.style.display = 'block';
@@ -1683,5 +2115,930 @@ async function preloadTestData() {
     }
 }
 
+// --- Tab Switching and Script Planner Logic ---
+
+function switchTab(tabName) {
+    if (!el.tabPlannerBtn || !el.tabMatcherBtn || !el.panelPlannerContent || !el.panelMatcherContent) return;
+    
+    if (tabName === 'planner') {
+        el.tabPlannerBtn.classList.add('active');
+        el.tabPlannerBtn.style.borderBottomColor = 'var(--color-primary)';
+        el.tabPlannerBtn.style.color = '#fff';
+        
+        el.tabMatcherBtn.classList.remove('active');
+        el.tabMatcherBtn.style.borderBottomColor = 'transparent';
+        el.tabMatcherBtn.style.color = 'var(--text-secondary)';
+        
+        el.panelPlannerContent.style.display = 'flex';
+        el.panelMatcherContent.style.display = 'none';
+    } else {
+        el.tabMatcherBtn.classList.add('active');
+        el.tabMatcherBtn.style.borderBottomColor = 'var(--color-primary)';
+        el.tabMatcherBtn.style.color = '#fff';
+        
+        el.tabPlannerBtn.classList.remove('active');
+        el.tabPlannerBtn.style.borderBottomColor = 'transparent';
+        el.tabPlannerBtn.style.color = 'var(--text-secondary)';
+        
+        el.panelMatcherContent.style.display = 'flex';
+        el.panelPlannerContent.style.display = 'none';
+    }
+}
+
+// Generate script plan outline by querying Gemini
+async function generateScriptPlan(clearCache = false) {
+    if (!songData) return alert("请先上传或分析歌曲！");
+    
+    const defaultVision = "这是一首讲述两个打工人（佐佐木和田山）互相救赎的 AMV/MAD。故事从两人互不认识开始，工作的压力与疲惫让彼此 messed up，但他们 keep coming around，用陪伴和温暖悄悄疗愈对方，最终走向相互依靠。情感基调：从压抑、孤独 → 惊喜相遇 → 暧昧摩擦 → 互相治愈 → 温暖释怀。";
+    const userVision = (el.userVisionInput && el.userVisionInput.value.trim()) ? el.userVisionInput.value.trim() : defaultVision;
+    
+    // If clear cache requested, call DELETE first
+    if (clearCache) {
+        try {
+            await fetch('/api/script_outline_cache', { method: 'DELETE' });
+        } catch (e) {
+            console.warn('Failed to clear outline cache:', e);
+        }
+    }
+    
+    showModal("✍️ 生成创意分镜脚本中", clearCache ? "已清除缓存，AI 大模型正在重新规划大纲..." : "AI 大模型正在通读歌词，规划视觉镜头大纲...");
+    appendModalLog("开始解析创作视角与情感起伏...");
+    appendModalLog(`构想设定: "${userVision.substring(0, 40)}..."`);
+    
+    updateModalProgress(40, "正在调用 Gemini-3.5-Flash 大模型进行分镜规划...");
+    
+    // Prepare lyrics list for backend
+    const lyricsPayload = songData.lyrics.map(l => ({
+        text: l.text,
+        start: l.start,
+        end: l.end
+    }));
+    
+    try {
+        const res = await fetch('/api/generate_script_plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lyrics: lyricsPayload,
+                user_vision: userVision
+            })
+        });
+        
+        const data = await res.json();
+        if (res.ok) {
+            updateModalProgress(100, "大纲生成成功！");
+            appendModalLog("--- 脚本分镜规划生成完成 ---");
+            appendModalLog(`成功生成了 ${data.length} 条分镜镜头描述。`);
+            
+            scriptPlan = data;
+            
+            // Render the lines
+            renderScriptOutline();
+            
+            // Update status badge
+            if (el.scriptStatusBadge) {
+                el.scriptStatusBadge.textContent = "已生成";
+                el.scriptStatusBadge.style.color = "var(--color-success)";
+                el.scriptStatusBadge.style.borderColor = "var(--color-success)";
+            }
+            
+            // Show apply button container
+            if (el.applyScriptContainer) {
+                el.applyScriptContainer.style.display = 'block';
+            }
+            
+            setTimeout(() => {
+                el.modalOverlay.style.display = 'none';
+            }, 1000);
+        } else {
+            updateModalProgress(100, "生成失败！");
+            appendModalLog(`错误原因: ${data.detail}`);
+            el.modalFooter.style.display = 'block';
+        }
+    } catch (e) {
+        updateModalProgress(100, "网络异常！");
+        appendModalLog(`连接失败: ${e.message}`);
+        el.modalFooter.style.display = 'block';
+    }
+}
+
+// Fetch and display recommended story concepts based on lyrics and DB video segments
+async function fetchStoryVisionRecommendations() {
+    if (!songData || !songData.lyrics || songData.lyrics.length === 0) return;
+    
+    // Reset and show container
+    if (el.recommendedVisionsContainer) el.recommendedVisionsContainer.style.display = 'block';
+    if (el.visionsLoading) el.visionsLoading.style.display = 'inline';
+    if (el.recommendedVisionsList) el.recommendedVisionsList.innerHTML = '';
+    
+    try {
+        const payload = {
+            lyrics: songData.lyrics.map(l => ({
+                text: l.text,
+                start: l.start,
+                end: l.end
+            }))
+        };
+        
+        const res = await fetch('/api/recommend_story_visions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (res.ok) {
+            const recommendations = await res.json();
+            if (el.recommendedVisionsList) {
+                el.recommendedVisionsList.innerHTML = '';
+                recommendations.forEach(item => {
+                    const card = document.createElement('div');
+                    card.style.cssText = "padding: 6px 10px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 11px; display: flex; flex-direction: column; gap: 3px;";
+                    
+                    // Add hover styles dynamically
+                    card.addEventListener('mouseenter', () => {
+                        card.style.background = 'rgba(255, 255, 255, 0.07)';
+                        card.style.borderColor = 'var(--color-primary)';
+                    });
+                    card.style.color = '#eee';
+                    card.addEventListener('mouseleave', () => {
+                        card.style.background = 'rgba(255, 255, 255, 0.03)';
+                        card.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                    });
+                    
+                    card.innerHTML = `
+                        <div style="font-weight: 600; color: var(--color-primary); font-size: 11.5px; display: flex; align-items: center; gap: 4px;">🎯 ${item.title}</div>
+                        <div style="font-size: 10.5px; color: var(--text-secondary); line-height: 1.3;">${item.description}</div>
+                    `;
+                    
+                    // Click handler to auto-populate user vision input
+                    card.addEventListener('click', () => {
+                        if (el.userVisionInput) {
+                            el.userVisionInput.value = item.description;
+                            // Trigger subtle border flash animation to denote success
+                            el.userVisionInput.style.borderColor = 'var(--color-primary)';
+                            el.userVisionInput.style.boxShadow = '0 0 8px rgba(255, 74, 150, 0.3)';
+                            setTimeout(() => {
+                                el.userVisionInput.style.borderColor = '';
+                                el.userVisionInput.style.boxShadow = '';
+                            }, 500);
+                        }
+                    });
+                    el.recommendedVisionsList.appendChild(card);
+                });
+            }
+        } else {
+            console.error("Failed to load story vision recommendations:", await res.text());
+            if (el.recommendedVisionsList) {
+                el.recommendedVisionsList.innerHTML = '<div style="font-size: 10.5px; color: var(--text-muted); padding: 5px;">暂无可用创意推荐</div>';
+            }
+        }
+    } catch (e) {
+        console.error("Error loading story vision recommendations:", e);
+        if (el.recommendedVisionsList) {
+            el.recommendedVisionsList.innerHTML = '<div style="font-size: 10.5px; color: var(--text-muted); padding: 5px;">网络连接异常</div>';
+        }
+    } finally {
+        if (el.visionsLoading) el.visionsLoading.style.display = 'none';
+    }
+}
+
+// Renders the editable script plan table
+function renderScriptOutline() {
+    if (!el.scriptLinesList || !scriptPlan) return;
+    
+    // Extract unique sections for high-level story panel
+    const uniqueSections = [];
+    const seenSections = new Set();
+    
+    // Section colors mapped for reference
+    const sectionColors = [
+        'rgba(99, 102, 241, 0.25)',   // indigo - Verse
+        'rgba(236, 72, 153, 0.25)',   // pink - Chorus
+        'rgba(16, 185, 129, 0.25)',   // emerald - Bridge
+        'rgba(245, 158, 11, 0.25)',   // amber - Outro
+        'rgba(59, 130, 246, 0.25)',   // blue
+        'rgba(168, 85, 247, 0.25)',   // purple
+    ];
+    const sectionBorderColors = [
+        'rgba(99, 102, 241, 0.6)',
+        'rgba(236, 72, 153, 0.6)',
+        'rgba(16, 185, 129, 0.6)',
+        'rgba(245, 158, 11, 0.6)',
+        'rgba(59, 130, 246, 0.6)',
+        'rgba(168, 85, 247, 0.6)',
+    ];
+
+    scriptPlan.forEach(line => {
+        if (line.section_name && !seenSections.has(line.section_name)) {
+            seenSections.add(line.section_name);
+            uniqueSections.push({
+                section_name: line.section_name,
+                mood_arc: line.mood_arc || '',
+                narrative_concept: line.narrative_concept || '',
+                visual_pacing: line.visual_pacing || ''
+            });
+        }
+    });
+
+    if (el.scriptHighLevelPanel && el.highLevelContent) {
+        if (uniqueSections.length > 0) {
+            el.scriptHighLevelPanel.style.display = 'block';
+            el.highLevelContent.innerHTML = '';
+            uniqueSections.forEach((sec, idx) => {
+                const borderCol = sectionBorderColors[idx % sectionBorderColors.length];
+                const bgCol = sectionColors[idx % sectionColors.length];
+                const item = document.createElement('div');
+                item.style.cssText = `
+                    padding: 8px 10px;
+                    border-left: 3px solid ${borderCol};
+                    background: rgba(255, 255, 255, 0.015);
+                    border-radius: 4px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 3px;
+                `;
+                item.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; font-weight: 600; color: #fff; font-size: 11px; align-items: center;">
+                        <span style="font-size: 11.5px; color: #00f2fe;">${sec.section_name} <span style="font-size: 9.5px; color: var(--text-muted); font-weight: normal; margin-left: 4px;">(${sec.visual_pacing === 'slow' ? '慢速节奏' : sec.visual_pacing === 'fast' ? '快速节奏' : '常规节奏'})</span></span>
+                        <span style="font-size: 10px; color: var(--color-primary); background: rgba(255, 74, 150, 0.1); padding: 1px 5px; border-radius: 3px;">${sec.mood_arc}</span>
+                    </div>
+                    ${sec.narrative_concept ? `<div style="font-size: 10px; color: #b4b4c6; line-height: 1.4; font-style: italic;">${sec.narrative_concept}</div>` : ''}
+                `;
+                el.highLevelContent.appendChild(item);
+            });
+        } else {
+            el.scriptHighLevelPanel.style.display = 'none';
+        }
+    }
+    
+    el.scriptLinesList.innerHTML = '';
+    
+    // Section colors are already declared at the top of the function
+    
+    let currentSection = null;
+    let sectionIndex = -1;
+    
+    scriptPlan.forEach((line, index) => {
+        // Insert section divider badge when section changes
+        const lineSectionName = line.section_name || null;
+        if (lineSectionName && lineSectionName !== currentSection) {
+            currentSection = lineSectionName;
+            sectionIndex = (sectionIndex + 1) % sectionColors.length;
+            
+            const sectionHeader = document.createElement('div');
+            sectionHeader.style.cssText = `
+                display: flex; align-items: center; gap: 8px; margin: 12px 0 4px 0;
+                padding: 6px 10px; border-radius: 6px;
+                background: ${sectionColors[sectionIndex]};
+                border-left: 3px solid ${sectionBorderColors[sectionIndex]};
+            `;
+            sectionHeader.innerHTML = `
+                <span style="font-size: 11px; font-weight: 600; color: #fff; letter-spacing: 0.03em;">
+                    ${lineSectionName}
+                </span>
+                ${line.mood_arc ? `<span style="font-size: 10px; color: rgba(255,255,255,0.55); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">· ${line.mood_arc}</span>` : ''}
+            `;
+            el.scriptLinesList.appendChild(sectionHeader);
+        }
+        
+        const slot = timelineSlots[index];
+        const dialogueHtml = (slot && slot.transcript) ? `
+            <div class="card-dialogue-container" style="margin-top: 4px; padding: 6px; background: rgba(0,242,254,0.04); border: 1px solid rgba(0,242,254,0.1); border-radius: 6px; display: flex; flex-direction: column; gap: 4px;">
+                <div style="font-size: 9.5px; color: #00f2fe; font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
+                    <span>🎙️ 原声台词对白</span>
+                    <label style="display: flex; align-items: center; gap: 3px; font-weight: normal; cursor: pointer; user-select: none;">
+                        <input type="checkbox" class="script-keep-audio-checkbox" data-index="${index}" ${slot.keep_audio ? 'checked' : ''} style="cursor: pointer; margin: 0; width: 12px; height: 12px;" /> 混合原声
+                    </label>
+                </div>
+                <div style="font-size: 10px; color: #e4e4f0; line-height: 1.3;">"${slot.transcript}"</div>
+            </div>
+        ` : '';
+
+        const card = document.createElement('div');
+        card.className = 'script-line-card';
+        card.style.cssText = "background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;";
+        
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 4px; margin-bottom: 2px;">
+                <span style="font-size: 10px; color: var(--color-primary); font-family: var(--font-mono);">分镜 #${index + 1}</span>
+                <span style="font-size: 9px; color: var(--text-muted); text-align: right;" title="${line.emotional_tone || ''}">${line.emotional_tone ? '🎭 ' + line.emotional_tone.substring(0, 15) + '...' : ''}</span>
+            </div>
+            <div style="font-size: 11px; color: var(--text-secondary); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                歌词: "${line.lyric}"
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <label style="font-size: 9px; color: var(--text-muted);">画面匹配提示词:</label>
+                <textarea class="script-prompt-input" data-index="${index}" style="width: 100%; height: 40px; padding: 5px; background: rgba(0,0,0,0.4); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; font-size: 11px; font-family: var(--font-sans); resize: none; outline: none;">${line.visual_prompt}</textarea>
+            </div>
+            ${dialogueHtml}
+            <div style="display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 4px;">
+                <div style="display: flex; align-items: center; gap: 4px;">
+                    <label style="font-size: 9px; color: var(--text-muted);">运动感:</label>
+                    <select class="script-motion-select" data-index="${index}" style="background: #0f0f18; border: 1px solid var(--border-color); border-radius: 4px; color: #fff; font-size: 10px; padding: 2px 4px; outline: none;">
+                        <option value="low" ${line.motion_preference === 'low' ? 'selected' : ''}>Low (慢)</option>
+                        <option value="medium" ${line.motion_preference === 'medium' ? 'selected' : ''}>Medium (中)</option>
+                        <option value="high" ${line.motion_preference === 'high' ? 'selected' : ''}>High (快)</option>
+                    </select>
+                </div>
+                <button class="btn btn-secondary script-regen-btn" data-index="${index}" style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.02);">
+                    🔄 局部重写
+                </button>
+            </div>
+        `;
+        
+        // Listen to changes in prompt text
+        card.querySelector('.script-prompt-input').addEventListener('input', (e) => {
+            scriptPlan[index].visual_prompt = e.target.value;
+        });
+        
+        // Listen to changes in motion select
+        card.querySelector('.script-motion-select').addEventListener('change', (e) => {
+            scriptPlan[index].motion_preference = e.target.value;
+        });
+        
+        // Listen to single line regenerate
+        card.querySelector('.script-regen-btn').addEventListener('click', () => {
+            regenerateScriptLine(index);
+        });
+        
+        // Listen to keep audio checkbox change
+        const audioCheckbox = card.querySelector('.script-keep-audio-checkbox');
+        if (audioCheckbox) {
+            audioCheckbox.addEventListener('change', (e) => {
+                if (timelineSlots[index]) {
+                    timelineSlots[index].keep_audio = e.target.checked;
+                    refreshTimelineBlocks();
+                    if (activeSlotIndex === index) {
+                        updatePreviewPlayerForSlot(index);
+                    }
+                }
+            });
+        }
+        
+        el.scriptLinesList.appendChild(card);
+    });
+}
+
+
+
+
+// Regenerates a single line's storyboard using Gemini based on user prompt feedback
+async function regenerateScriptLine(index) {
+    if (!scriptPlan || !scriptPlan[index]) return;
+    
+    const feedback = prompt(`请输入您对分镜 #${index + 1} 的画面修改意见 (例如: "让他走在大雨滂沱的赛博朋克废墟街道中" )：`);
+    if (!feedback) return; // user cancelled
+    
+    const line = scriptPlan[index];
+    const userVision = el.userVisionInput ? el.userVisionInput.value.trim() : "";
+    
+    // Disable regen button and show spinner
+    const btn = document.querySelector(`.script-regen-btn[data-index="${index}"]`);
+    if (btn) {
+        btn.textContent = "⏳...";
+        btn.setAttribute('disabled', 'true');
+    }
+    
+    try {
+        const res = await fetch('/api/regenerate_script_line', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lyric_text: line.lyric,
+                current_prompt: line.visual_prompt,
+                user_feedback: feedback,
+                user_vision: userVision
+            })
+        });
+        
+        const data = await res.json();
+        if (res.ok) {
+            scriptPlan[index].visual_prompt = data.visual_prompt;
+            scriptPlan[index].motion_preference = data.motion_preference;
+            scriptPlan[index].emotional_tone = data.emotional_tone;
+            
+            // Re-render
+            renderScriptOutline();
+        } else {
+            alert(`局部改写失败: ${data.detail}`);
+            if (btn) {
+                btn.textContent = "🔄 局部重写";
+                btn.removeAttribute('disabled');
+            }
+        }
+    } catch (e) {
+        alert(`网络异常: ${e.message}`);
+        if (btn) {
+            btn.textContent = "🔄 局部重写";
+            btn.removeAttribute('disabled');
+        }
+    }
+}
+
+// Applies script plan & runs bulk auto matcher
+function applyScriptAndMatchAll() {
+    if (!scriptPlan) return;
+    
+    // Switch to matcher tab
+    switchTab('matcher');
+    
+    // Trigger bulk card matching
+    autoMatchAllSlots();
+}
+
+// Video & Transcript Browser Modal Logic
+async function openVideoBrowser() {
+    browserLog("openVideoBrowser: Modal opening triggered.");
+    const modal = document.getElementById('video-browser-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        browserLog("openVideoBrowser: modal display set to flex.");
+    } else {
+        browserLog("openVideoBrowser ERROR: #video-browser-modal element not found.");
+    }
+    
+    // Pause main playback if playing
+    if (isPlaying) {
+        browserLog("openVideoBrowser: Pausing main playback.");
+        togglePlayback();
+    }
+    // Pause both main preview players
+    pauseBothPlayers();
+    
+    // Fetch latest videos and populate list
+    try {
+        browserLog("openVideoBrowser: Fetching fresh list of videos from /api/videos...");
+        const res = await fetch('/api/videos');
+        if (res.ok) {
+            allIndexedVideos = await res.json();
+            browserLog(`openVideoBrowser: Fetched ${allIndexedVideos.length} videos from API.`);
+            updateModelStatus(true, `已索引 ${allIndexedVideos.length} 个视频`);
+            populateManualVideoSelect();
+        } else {
+            browserLog(`openVideoBrowser ERROR: Fetch failed with status ${res.status}`);
+        }
+    } catch (e) {
+        browserLog("openVideoBrowser EXCEPTION: " + e.message);
+        console.error("Failed to refresh videos in browser:", e);
+    }
+    
+    populateBrowserVideoList();
+}
+
+function closeVideoBrowser() {
+    browserLog("closeVideoBrowser: Modal closing.");
+    const modal = document.getElementById('video-browser-modal');
+    const player = document.getElementById('browser-preview-player');
+    const placeholder = document.getElementById('browser-player-placeholder');
+    const listContainer = document.getElementById('browser-transcript-list');
+    const segmentListContainer = document.getElementById('browser-segment-list');
+    const countBadge = document.getElementById('browser-transcript-count');
+    
+    if (modal) modal.style.display = 'none';
+    if (player) {
+        player.pause();
+        player.src = "";
+        player.load();
+    }
+    if (placeholder) placeholder.style.display = 'flex';
+    if (listContainer) listContainer.innerHTML = '<div class="empty-state" style="padding:30px 0;"><p>选择左侧视频以加载台词对白</p></div>';
+    if (segmentListContainer) segmentListContainer.innerHTML = '<div class="empty-state" style="padding:30px 0;"><p>选择左侧视频以加载 Gemini 场景分析</p></div>';
+    if (countBadge) countBadge.textContent = `0 句`;
+    
+    // Reset state
+    currentBrowserVideoId = null;
+    currentBrowserTranscripts = [];
+    currentBrowserSegments = [];
+    switchBrowserTab('transcripts'); // reset tab to transcripts
+}
+
+function populateBrowserVideoList() {
+    browserLog("populateBrowserVideoList: Rendering video items. Count: " + allIndexedVideos.length);
+    const list = document.getElementById('browser-video-list');
+    if (!list) {
+        browserLog("populateBrowserVideoList ERROR: #browser-video-list element not found.");
+        return;
+    }
+    
+    list.innerHTML = '';
+    if (allIndexedVideos.length === 0) {
+        browserLog("populateBrowserVideoList: allIndexedVideos is empty.");
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.style.padding = '20px 0';
+        empty.innerHTML = '<p>暂无已索引视频，请在上方输入路径并点击“索引视频”。</p>';
+        list.appendChild(empty);
+        return;
+    }
+    
+    allIndexedVideos.forEach(video => {
+        const item = document.createElement('div');
+        item.className = 'browser-video-item';
+        const videoName = (video.original_path || "未知视频").split('/').pop().split('\\').pop();
+        item.textContent = videoName;
+        item.title = video.original_path || "";
+        
+        // Inline styles to guarantee rendering even if CSS is cached
+        item.style.cursor = 'pointer';
+        item.style.padding = '8px 12px';
+        item.style.borderRadius = '6px';
+        item.style.background = 'rgba(255, 255, 255, 0.02)';
+        item.style.border = '1px solid var(--border-color)';
+        item.style.fontSize = '12px';
+        item.style.color = 'var(--text-secondary)';
+        item.style.transition = 'all 0.2s ease';
+        item.style.wordBreak = 'break-all';
+        
+        // Hover effects via JS
+        item.addEventListener('mouseenter', () => {
+            if (!item.classList.contains('active')) {
+                item.style.background = 'rgba(255, 255, 255, 0.06)';
+                item.style.borderColor = 'rgba(0, 242, 254, 0.4)';
+                item.style.color = '#fff';
+            }
+        });
+        item.addEventListener('mouseleave', () => {
+            if (!item.classList.contains('active')) {
+                item.style.background = 'rgba(255, 255, 255, 0.02)';
+                item.style.borderColor = 'var(--border-color)';
+                item.style.color = 'var(--text-secondary)';
+            }
+        });
+        
+        list.appendChild(item);
+    });
+    browserLog("populateBrowserVideoList: All items appended.");
+}
+
+async function selectBrowserVideo(video) {
+    browserLog(`selectBrowserVideo: Starting selection for ID: ${video.id}`);
+    currentBrowserVideoId = video.id;
+    currentBrowserTranscripts = [];
+    currentBrowserSegments = [];
+    
+    const player = document.getElementById('browser-preview-player');
+    const placeholder = document.getElementById('browser-player-placeholder');
+    const listContainer = document.getElementById('browser-transcript-list');
+    const segmentListContainer = document.getElementById('browser-segment-list');
+    const countBadge = document.getElementById('browser-transcript-count');
+    
+    if (video.proxy_url) {
+        browserLog(`selectBrowserVideo: proxy_url found: "${video.proxy_url}"`);
+        if (player) {
+            player.src = video.proxy_url;
+            player.load();
+            player.play().then(() => {
+                browserLog("selectBrowserVideo: Video playback started successfully.");
+            }).catch(e => {
+                browserLog("selectBrowserVideo: Playback promise failed (expected if user didn't interact first): " + e.message);
+            });
+        } else {
+            browserLog("selectBrowserVideo ERROR: #browser-preview-player not found.");
+        }
+        if (placeholder) placeholder.style.display = 'none';
+    } else {
+        browserLog("selectBrowserVideo WARNING: proxy_url is empty.");
+        if (player) player.src = "";
+        if (placeholder) {
+            placeholder.style.display = 'flex';
+            placeholder.textContent = "无法播放该视频 (没有代理预览文件)";
+        }
+    }
+    
+    if (listContainer) {
+        listContainer.innerHTML = '<div class="loading-state" style="padding:20px; text-align:center; color:#9a9ab0;"><span class="spinner">⌛</span> 正在加载台词对白...</div>';
+    }
+    if (segmentListContainer) {
+        segmentListContainer.innerHTML = '<div class="loading-state" style="padding:20px; text-align:center; color:#9a9ab0;"><span class="spinner">⌛</span> 正在加载 Gemini 场景分析...</div>';
+    }
+    if (countBadge) countBadge.textContent = `加载中...`;
+    
+    // Fetch transcripts
+    try {
+        const url = `/api/videos/${video.id}/transcripts`;
+        browserLog(`selectBrowserVideo: Fetching transcripts from "${url}"`);
+        const res = await fetch(url);
+        if (res.ok) {
+            currentBrowserTranscripts = await res.json();
+            browserLog(`selectBrowserVideo: Transcripts loaded: ${currentBrowserTranscripts.length}`);
+        } else {
+            browserLog(`selectBrowserVideo: Fetch transcripts failed with HTTP status ${res.status}`);
+        }
+    } catch (e) {
+        browserLog(`selectBrowserVideo transcripts fetch EXCEPTION: ${e.message}`);
+    }
+    
+    // Fetch segments
+    try {
+        const url = `/api/videos/${video.id}/segments`;
+        browserLog(`selectBrowserVideo: Fetching segments from "${url}"`);
+        const res = await fetch(url);
+        if (res.ok) {
+            currentBrowserSegments = await res.json();
+            browserLog(`selectBrowserVideo: Segments loaded: ${currentBrowserSegments.length}`);
+        } else {
+            browserLog(`selectBrowserVideo: Fetch segments failed with HTTP status ${res.status}`);
+        }
+    } catch (e) {
+        browserLog(`selectBrowserVideo segments fetch EXCEPTION: ${e.message}`);
+    }
+    
+    // Render the active tab
+    renderActiveBrowserTab();
+}
+
+function renderBrowserTranscripts(transcripts) {
+    browserLog(`renderBrowserTranscripts: Starting render for ${transcripts.length} entries.`);
+    const listContainer = document.getElementById('browser-transcript-list');
+    const countBadge = document.getElementById('browser-transcript-count');
+    const player = document.getElementById('browser-preview-player');
+    
+    if (!listContainer) {
+        browserLog("renderBrowserTranscripts ERROR: #browser-transcript-list not found.");
+        return;
+    }
+    
+    // Programmatically ensure dimensions and flex behavior to override cache or parent flex collapse
+    listContainer.style.height = '320px';
+    listContainer.style.flexShrink = '0';
+    
+    listContainer.innerHTML = '';
+    if (countBadge) countBadge.textContent = `${transcripts.length} 句`;
+    
+    if (transcripts.length === 0) {
+        browserLog("renderBrowserTranscripts: 0 transcripts to display.");
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.style.padding = '30px 0';
+        empty.style.textAlign = 'center';
+        empty.style.color = '#9a9ab0';
+        empty.innerHTML = '<p>该视频未检测到或未生成台词对白</p>';
+        listContainer.appendChild(empty);
+        return;
+    }
+    
+    transcripts.forEach(transcript => {
+        const item = document.createElement('div');
+        item.className = 'browser-transcript-item';
+        item.dataset.startTime = transcript.start_time;
+        item.dataset.endTime = transcript.end_time || (transcript.start_time + 3.0);
+        
+        // Hardcoded inline styles for transcript list item
+        item.style.display = 'flex';
+        item.style.gap = '12px';
+        item.style.alignItems = 'flex-start';
+        item.style.padding = '8px 10px';
+        item.style.borderRadius = '6px';
+        item.style.cursor = 'pointer';
+        item.style.background = 'rgba(255, 255, 255, 0.01)';
+        item.style.border = '1px solid transparent';
+        item.style.transition = 'all 0.2s ease';
+        
+        const timeTag = document.createElement('span');
+        timeTag.className = 'browser-transcript-time';
+        timeTag.textContent = formatTime(transcript.start_time);
+        
+        // Hardcoded inline styles for time tag
+        timeTag.style.fontFamily = "'JetBrains Mono', monospace";
+        timeTag.style.color = '#00f0ff';
+        timeTag.style.fontSize = '11px';
+        timeTag.style.fontWeight = '500';
+        timeTag.style.background = 'rgba(0, 242, 254, 0.08)';
+        timeTag.style.padding = '2px 6px';
+        timeTag.style.borderRadius = '4px';
+        timeTag.style.flexShrink = '0';
+        
+        const textSpan = document.createElement('span');
+        textSpan.className = 'browser-transcript-text';
+        textSpan.textContent = transcript.text;
+        
+        // Hardcoded inline styles for transcript text
+        textSpan.style.color = '#9a9ab0';
+        textSpan.style.fontSize = '12px';
+        textSpan.style.lineHeight = '1.4';
+        textSpan.style.flexGrow = '1';
+        textSpan.style.wordBreak = 'break-word';
+        textSpan.style.transition = 'color 0.2s ease';
+        
+        item.appendChild(timeTag);
+        item.appendChild(textSpan);
+        
+        // Hover listeners
+        item.addEventListener('mouseenter', () => {
+            if (!item.classList.contains('playing')) {
+                item.style.background = 'rgba(255, 255, 255, 0.04)';
+                item.style.borderColor = 'rgba(255, 255, 255, 0.05)';
+                textSpan.style.color = '#ffffff';
+            }
+        });
+        item.addEventListener('mouseleave', () => {
+            if (!item.classList.contains('playing')) {
+                item.style.background = 'rgba(255, 255, 255, 0.01)';
+                item.style.borderColor = 'transparent';
+                textSpan.style.color = '#9a9ab0';
+            }
+        });
+        
+        item.addEventListener('click', () => {
+            browserLog(`Transcript item click: seeking player to start_time: ${transcript.start_time}s`);
+            if (player) {
+                player.currentTime = transcript.start_time;
+                player.play().catch(e => console.log("Play failed on seek:", e));
+            }
+            highlightPlayingTranscript(item);
+        });
+        
+        listContainer.appendChild(item);
+    });
+    const compStyle = window.getComputedStyle(listContainer);
+    browserLog(`renderBrowserTranscripts: Completed rendering ${transcripts.length} nodes.`);
+    browserLog(`[DIAGNOSTIC] listContainer: clientHeight=${listContainer.clientHeight}px, offsetHeight=${listContainer.offsetHeight}px, scrollHeight=${listContainer.scrollHeight}px`);
+    browserLog(`[DIAGNOSTIC] listContainer Styles: display=${compStyle.display}, height=${compStyle.height}, max-height=${compStyle.maxHeight}, flexShrink=${compStyle.flexShrink}`);
+    
+    // Trace parent hierarchy
+    let parent = listContainer.parentElement;
+    let depth = 1;
+    while (parent && parent.tagName !== 'BODY') {
+        const pStyle = window.getComputedStyle(parent);
+        browserLog(`[DIAGNOSTIC] Parent L${depth} (<${parent.tagName}> id="${parent.id || ''}" class="${parent.className || ''}"): display=${pStyle.display}, height=${pStyle.height}, maxHeight=${pStyle.maxHeight}, flex=${pStyle.flex || (pStyle.flexGrow + ' ' + pStyle.flexShrink + ' ' + pStyle.flexBasis)}`);
+        parent = parent.parentElement;
+        depth++;
+    }
+}
+
+function highlightPlayingTranscript(activeItem) {
+    const listContainer = document.getElementById('browser-transcript-list');
+    if (!listContainer) return;
+    
+    const items = listContainer.querySelectorAll('.browser-transcript-item');
+    items.forEach(item => {
+        const textSpan = item.querySelector('.browser-transcript-text');
+        if (item === activeItem) {
+            item.classList.add('playing');
+            item.style.background = 'rgba(0, 242, 254, 0.05)';
+            item.style.borderColor = 'rgba(0, 242, 254, 0.2)';
+            if (textSpan) {
+                textSpan.style.color = '#ffffff';
+                textSpan.style.fontWeight = '500';
+            }
+            item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            item.classList.remove('playing');
+            item.style.background = 'rgba(255, 255, 255, 0.01)';
+            item.style.borderColor = 'transparent';
+            if (textSpan) {
+                textSpan.style.color = 'var(--text-secondary)';
+                textSpan.style.fontWeight = 'normal';
+            }
+        }
+    });
+}
+
+// Synchronize transcript scroll position on timeupdate
+document.addEventListener('DOMContentLoaded', () => {
+    const player = document.getElementById('browser-preview-player');
+    if (player) {
+        player.addEventListener('timeupdate', () => {
+            const currTime = player.currentTime;
+            const listContainer = document.getElementById('browser-transcript-list');
+            if (!listContainer) return;
+            const items = listContainer.querySelectorAll('.browser-transcript-item');
+            let activeItem = null;
+            
+            items.forEach(item => {
+                const start = parseFloat(item.dataset.startTime);
+                const end = parseFloat(item.dataset.endTime);
+                if (currTime >= start && currTime <= end) {
+                    activeItem = item;
+                }
+            });
+            
+            if (activeItem && !activeItem.classList.contains('playing')) {
+                highlightPlayingTranscript(activeItem);
+            }
+        });
+    }
+});
+
 // Start everything
 window.addEventListener('DOMContentLoaded', init);
+
+function switchBrowserTab(tab) {
+    currentBrowserTab = tab;
+    
+    const transcriptsBtn = document.getElementById('browser-tab-transcripts-btn');
+    const segmentsBtn = document.getElementById('browser-tab-segments-btn');
+    const transcriptsContainer = document.getElementById('browser-transcript-list-container');
+    const segmentsContainer = document.getElementById('browser-segment-list-container');
+    
+    if (!transcriptsBtn || !segmentsBtn || !transcriptsContainer || !segmentsContainer) return;
+    
+    if (tab === 'transcripts') {
+        transcriptsBtn.classList.add('active');
+        transcriptsBtn.style.background = 'rgba(0,242,254,0.12)';
+        transcriptsBtn.style.borderColor = 'rgba(0,242,254,0.25)';
+        transcriptsBtn.style.color = '#fff';
+        transcriptsBtn.style.border = '1px solid var(--border-color)';
+        
+        segmentsBtn.classList.remove('active');
+        segmentsBtn.style.background = 'transparent';
+        segmentsBtn.style.borderColor = 'transparent';
+        segmentsBtn.style.color = 'var(--text-secondary)';
+        segmentsBtn.style.border = '1px solid transparent';
+        
+        transcriptsContainer.style.display = 'block';
+        segmentsContainer.style.display = 'none';
+    } else {
+        segmentsBtn.classList.add('active');
+        segmentsBtn.style.background = 'rgba(0,242,254,0.12)';
+        segmentsBtn.style.borderColor = 'rgba(0,242,254,0.25)';
+        segmentsBtn.style.color = '#fff';
+        segmentsBtn.style.border = '1px solid var(--border-color)';
+        
+        transcriptsBtn.classList.remove('active');
+        transcriptsBtn.style.background = 'transparent';
+        transcriptsBtn.style.borderColor = 'transparent';
+        transcriptsBtn.style.color = 'var(--text-secondary)';
+        transcriptsBtn.style.border = '1px solid transparent';
+        
+        transcriptsContainer.style.display = 'none';
+        segmentsContainer.style.display = 'block';
+    }
+    
+    renderActiveBrowserTab();
+}
+
+function renderActiveBrowserTab() {
+    const countBadge = document.getElementById('browser-transcript-count');
+    
+    if (currentBrowserTab === 'transcripts') {
+        if (countBadge) countBadge.textContent = `${currentBrowserTranscripts.length} 句`;
+        renderBrowserTranscripts(currentBrowserTranscripts);
+    } else {
+        if (countBadge) countBadge.textContent = `${currentBrowserSegments.length} 个片段`;
+        renderBrowserSegments(currentBrowserSegments);
+    }
+}
+
+function renderBrowserSegments(segments) {
+    const listContainer = document.getElementById('browser-segment-list');
+    const player = document.getElementById('browser-preview-player');
+    
+    if (!listContainer) return;
+    
+    listContainer.innerHTML = '';
+    
+    if (segments.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.style.padding = '30px 0';
+        empty.style.textAlign = 'center';
+        empty.style.color = '#9a9ab0';
+        empty.innerHTML = '<p>该视频暂无 Gemini 场景分析数据</p>';
+        listContainer.appendChild(empty);
+        return;
+    }
+    
+    segments.forEach(seg => {
+        const item = document.createElement('div');
+        item.className = 'browser-segment-item';
+        item.style.cssText = "cursor: pointer; padding: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); font-size: 11px; display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); transition: all 0.2s;";
+        
+        // Hover effect via JS
+        item.addEventListener('mouseenter', () => {
+            item.style.background = 'rgba(255, 255, 255, 0.05)';
+            item.style.borderColor = 'rgba(0, 242, 254, 0.3)';
+        });
+        item.addEventListener('mouseleave', () => {
+            item.style.background = 'rgba(255, 255, 255, 0.02)';
+            item.style.borderColor = 'var(--border-color)';
+        });
+        
+        const motionEmoji = seg.motion_intensity === 'high' ? '🔥 高' : seg.motion_intensity === 'medium' ? '⚡ 中' : '❄️ 低';
+        
+        item.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.04); padding-bottom: 4px; margin-bottom: 2px;">
+                <span style="font-family: monospace; font-size: 10px; color: var(--color-primary); font-weight: bold;">[${seg.start_time.toFixed(1)}s - ${seg.end_time.toFixed(1)}s]</span>
+                <span style="font-size: 9px; padding: 1px 4px; background: rgba(255,255,255,0.06); border-radius: 3px; color: #ccc;">运动: ${motionEmoji}</span>
+            </div>
+            <div><strong>🎬 画面描述:</strong> <span style="color: #eee;">${seg.summary}</span></div>
+            ${seg.visual_style ? `<div><strong>🎨 视觉风格:</strong> <span style="color: #ccc;">${seg.visual_style}</span></div>` : ''}
+            ${seg.emotion_flow ? `<div><strong>❤️ 情感氛围:</strong> <span style="color: #ccc;">${seg.emotion_flow}</span></div>` : ''}
+            ${seg.tags && seg.tags.length > 0 ? `
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+                ${seg.tags.map(t => `<span style="background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.15); border-radius: 3px; padding: 1px 4px; font-size: 8px; color: var(--color-primary);">${t}</span>`).join('')}
+            </div>
+            ` : ''}
+        `;
+        
+        item.addEventListener('click', () => {
+            if (player) {
+                player.currentTime = seg.start_time;
+                player.play().catch(() => {});
+                browserLog(`Seeking preview player to segment start: ${seg.start_time.toFixed(1)}s`);
+            }
+        });
+        
+        listContainer.appendChild(item);
+    });
+}

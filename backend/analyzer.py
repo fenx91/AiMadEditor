@@ -6,6 +6,48 @@ import subprocess
 import shutil
 
 # Parse LRC lyrics
+def is_metadata_line(text):
+    text_clean = text.strip()
+    if not text_clean:
+        return True
+        
+    meta_keywords = [
+        # Chinese credits
+        "歌曲", "歌手", "作词", "作曲", "编曲", "词曲", "词/曲", "制作人", "演唱", "歌词", "后期",
+        "混音", "录音", "和声", "母带", "企划", "监制", "出品", "发行", "设计", "视觉", "歌词制作", "歌词编辑",
+        # English credits (case-insensitive via text_lower below)
+        "title", "artist", "album", "lyrics", "music", "producer", "composer", "lyricist",
+        "arranged", "written", "composed", "produced", "performed", "mixed", "mastered",
+        "recorded", "engineered", "published", "copyright", "℗", "©",
+    ]
+    
+    text_lower = text_clean.lower()
+    
+    # If the text is wrapped in brackets like [ar:Artist], it's metadata
+    if text_lower.startswith("[") and text_lower.endswith("]"):
+        return True
+
+    # Generic pattern: "Word(s) by：..." or "Word(s) by:..." 
+    # e.g. "Composed by：Pink/Max Martin"
+    import re
+    if re.match(r'^[\w\s/]+\s+by\s*[：:]', text_lower):
+        return True
+    # Also catch "Composed by Pink/Max Martin" (no colon, ends without lyric-like content)
+    if re.match(r'^[\w\s]+\s+by\b', text_lower) and '/' in text_clean:
+        return True
+        
+    # Copyright symbols (check original text, not lowercased)
+    if text_clean.startswith("©") or text_clean.startswith("℗"):
+        return True
+
+    for kw in meta_keywords:
+        if text_lower.startswith(kw.lower()):
+            rem = text_lower[len(kw):].strip()
+            # If empty or starts with common separators like colon, dash, slash, or "by"
+            if not rem or any(rem.startswith(c) for c in [":", "：", "-", "/", " by"]):
+                return True
+    return False
+
 def parse_lrc(lrc_content, total_duration):
     # Regex to match [mm:ss.xx] or [mm:ss:xx] or [mm:ss]
     time_regex = re.compile(r"\[(\d{2}):(\d{2})[.:](\d{2,3})?\]")
@@ -26,8 +68,8 @@ def parse_lrc(lrc_content, total_duration):
         # Remove all time tags to get the lyric text
         text = time_regex.sub("", line).strip()
         
-        # If the text is meta tags like [ar:Artist], skip
-        if text.startswith("[") and text.endswith("]"):
+        # Skip if it is a metadata line
+        if is_metadata_line(text):
             continue
             
         for tag in tags:
@@ -62,7 +104,9 @@ def parse_lrc(lrc_content, total_duration):
 
 # Parse plain text lyrics (distribute evenly)
 def parse_txt(txt_content, total_duration):
-    lines = [line.strip() for line in txt_content.splitlines() if line.strip()]
+    raw_lines = [line.strip() for line in txt_content.splitlines() if line.strip()]
+    # Skip metadata lines
+    lines = [line for line in raw_lines if not is_metadata_line(line)]
     if not lines:
         return []
         

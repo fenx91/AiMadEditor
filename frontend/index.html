@@ -6,7 +6,7 @@
     <title>AI MV Script & HyperFrames Studio</title>
     <!-- Google Fonts: Inter & JetBrains Mono -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/style.css">
+    <link rel="stylesheet" href="/assets/style.css?v=2">
 </head>
 <body>
     <div class="glow-bg"></div>
@@ -23,11 +23,14 @@
             <div class="header-controls">
                 <div class="indexing-panel glass-card">
                     <input type="text" id="index-dir-input" placeholder="输入本地视频素材文件夹绝对路径..." value="/home/fenxy/editor/in" />
+                    <label style="display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; padding: 0 4px; user-select: none;">
+                        <input type="checkbox" id="force-refresh-cache" style="cursor: pointer; margin: 0; width: 14px; height: 14px;" /> 强制刷新缓存
+                    </label>
                     <button id="index-dir-btn" class="btn btn-primary">
                         <span class="icon">🔍</span> 索引视频
                     </button>
                 </div>
-                <div class="status-badge" id="model-status">
+                <div class="status-badge clickable" id="model-status" title="点击浏览已索引视频及台词" style="cursor: pointer;">
                     <span class="status-dot green"></span>
                     <span class="status-text">CLIP 加载中...</span>
                 </div>
@@ -178,70 +181,139 @@
 
             <!-- Right Side: AI Assistant & Matching Candidates -->
             <section class="panel-right glass-card">
-                <div class="panel-header">
-                    <h2>🤖 AI 智能匹配推荐</h2>
-                </div>
-                
-                <div class="active-lyric-details">
-                    <div class="active-lyric-header">当前选中槽位</div>
-                    <div class="active-lyric-text" id="active-lyric-text">请在左侧或时间轴上选择一个歌词槽位</div>
-                    <div class="active-lyric-meta" id="active-lyric-meta">时间区间: --s</div>
-                    <button id="clear-slot-btn" class="btn btn-secondary btn-full" style="display:none; margin-top: 10px; font-size:11px; padding:6px; border-color: rgba(255, 100, 100, 0.25); color: #ff6b6b; font-weight: 500;">
-                        ❌ 取消素材关联 (让上文延续)
+                <!-- Tabs Header -->
+                <div class="panel-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: rgba(0, 0, 0, 0.15);">
+                    <button id="tab-planner-btn" class="panel-tab-btn active" style="flex: 1; padding: 12px; background: none; border: none; border-bottom: 2px solid var(--color-primary); color: #fff; font-family: var(--font-sans); font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+                        ✍️ 创意脚本大纲
+                    </button>
+                    <button id="tab-matcher-btn" class="panel-tab-btn" style="flex: 1; padding: 12px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+                        🎬 AI 智能卡点
                     </button>
                 </div>
-
-                <div class="matching-settings">
-                    <div class="form-group">
-                        <label for="search-query-input">🔍 自定义搜索提示词:</label>
-                        <input type="text" id="search-query-input" placeholder="留空默认使用当前歌词语义进行匹配..." style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 12px; outline: none; transition: border-color 0.2s;" />
-                    </div>
-                    <div class="form-group">
-                        <label for="motion-preference">🕺 画面运动感偏好:</label>
-                        <select id="motion-preference">
-                            <option value="any">任何节奏 (无限制)</option>
-                            <option value="low">宁静舒缓 (低运动度)</option>
-                            <option value="medium">律动适中 (中运动度)</option>
-                            <option value="high">激情动感 (高运动度)</option>
-                        </select>
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <button id="find-matches-btn" class="btn btn-primary" style="padding: 8px 10px; font-size: 12px;" disabled>
-                            ⚡ 语义匹配此段
-                        </button>
-                        <button id="auto-match-all-btn" class="btn btn-accent" style="padding: 8px 10px; font-size: 12px;" disabled>
-                            🤖 一键智能匹配
-                        </button>
-                    </div>
-                </div>
-
-                <div class="manual-assign-settings" style="padding: 15px; border-bottom: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.005);">
-                    <div class="active-lyric-header" style="margin-bottom: 8px;">🛠️ 手动选择素材与时间轴</div>
-                    <div class="form-group" style="margin-bottom: 8px;">
-                        <label for="manual-video-select" style="font-size: 10px; color: var(--text-secondary);">选择素材视频:</label>
-                        <select id="manual-video-select" style="width: 100%; padding: 6px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px;">
-                            <option value="">-- 请选择索引库中的视频 --</option>
-                        </select>
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: flex-end; margin-bottom: 5px;">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label for="manual-clip-start" style="font-size: 10px; color: var(--text-secondary);">起始时间轴 (秒):</label>
-                            <input type="number" id="manual-clip-start" min="0" step="0.1" value="0.0" style="width: 100%; padding: 5px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; font-family: var(--font-mono);" />
+                
+                <!-- Tab 1 Container: Script Planner -->
+                <div id="panel-planner-content" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+                    <div class="vision-settings" style="padding: 15px; border-bottom: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.005);">
+                        <div class="form-group" style="margin-bottom: 8px;">
+                            <label for="user-vision-input" style="font-size: 11px; font-weight: 500; margin-bottom: 6px; display: block;">🎨 设计您的 MAD 主题/创作心情偏好:</label>
+                            <textarea id="user-vision-input" style="width: 100%; height: 60px; padding: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 12px; font-family: var(--font-sans); resize: none; outline: none;">这是一首讲述两个打工人（佐佐木和田山）互相救赎的 AMV/MAD。故事从两人互不认识开始，工作的压力与疲惫让彼此 messed up，但他们 keep coming around，用陪伴和温暖悄悄疗愈对方，最终走向相互依靠。情感基调：从压抑、孤独 → 惊喜相遇 → 暧昧摩擦 → 互相治愈 → 温暖释怀。</textarea>
                         </div>
-                        <button id="manual-assign-btn" class="btn btn-secondary" style="padding: 5px 0; font-size: 11px; width: 100%; font-weight: 500;" disabled>
-                            💾 应用此素材
+                        
+                        <!-- Recommended Story Concepts Container -->
+                        <div id="recommended-visions-container" style="display: none; margin-top: 10px; margin-bottom: 12px;">
+                            <label style="font-size: 10.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+                                <span>💡 推荐故事构想 (点击快速选用):</span>
+                                <span id="visions-loading" style="font-size: 9.5px; color: var(--color-primary); display: none; font-weight: normal;">正在加载...</span>
+                            </label>
+                            <div id="recommended-visions-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 130px; overflow-y: auto; padding-right: 4px;">
+                                <!-- Dynamically loaded cards -->
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 6px;">
+                            <button id="generate-script-btn" class="btn btn-primary btn-full" style="padding: 8px 0; font-size: 12px; flex: 1;" disabled>
+                                ⚡ 生成创意脚本大纲
+                            </button>
+                            <button id="regenerate-script-btn" class="btn btn-secondary" style="padding: 8px 10px; font-size: 11px; white-space: nowrap;" title="清除缓存并重新生成大纲" disabled>
+                                🔄 重置
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="script-outline-container" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 10px;">
+                        <div class="panel-header-sub" style="padding: 5px 0 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04);">
+                            <h3 style="font-size: 12px; font-weight: 600;">📖 脚本分镜规划</h3>
+                            <span class="badge" id="script-status-badge">未生成</span>
+                        </div>
+                        
+                        <!-- High-Level Story Summary Panel -->
+                        <div id="script-high-level-panel" style="display: none; margin-bottom: 12px; padding: 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; flex-shrink: 0; transition: all 0.3s ease-in-out;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 6px;">
+                                <h4 style="font-size: 11px; font-weight: 600; color: var(--color-primary); margin: 0; display: flex; align-items: center; gap: 4px;">📖 故事脉络大纲</h4>
+                                <button id="toggle-high-level-btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); font-size: 10px; cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: all 0.2s;">收起</button>
+                            </div>
+                            <div id="high-level-content" style="font-size: 11px; display: flex; flex-direction: column; gap: 8px; max-height: 160px; overflow-y: auto; padding-right: 4px;">
+                                <!-- Dynamically loaded high level section summaries -->
+                            </div>
+                        </div>
+
+                        <div id="script-lines-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px;">
+                            <div class="empty-state">
+                                <p>点击“生成创意脚本大纲”为当前歌曲和心情量身定制分镜描述</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="apply-script-container" style="padding: 10px; border-top: 1px solid var(--border-color); display: none; background: rgba(0,0,0,0.15);">
+                        <button id="apply-script-btn" class="btn btn-accent btn-full" style="padding: 10px 0; font-size: 13px;">
+                            💾 应用此大纲并执行一键匹配
                         </button>
                     </div>
                 </div>
-
-                <div class="candidates-container">
-                    <div class="panel-header-sub">
-                        <h3>💡 AI 候选片段</h3>
-                        <span class="badge" id="candidates-count">Top 5</span>
+                
+                <!-- Tab 2 Container: AI Matcher -->
+                <div id="panel-matcher-content" style="display: none; flex-direction: column; flex: 1; overflow: hidden;">
+                    <div class="active-lyric-details">
+                        <div class="active-lyric-header">当前选中槽位</div>
+                        <div class="active-lyric-text" id="active-lyric-text">请在左侧或时间轴上选择一个歌词槽位</div>
+                        <div class="active-lyric-meta" id="active-lyric-meta">时间区间: --s</div>
+                        <button id="clear-slot-btn" class="btn btn-secondary btn-full" style="display:none; margin-top: 10px; font-size:11px; padding:6px; border-color: rgba(255, 100, 100, 0.25); color: #ff6b6b; font-weight: 500;">
+                            ❌ 取消素材关联 (让上文延续)
+                        </button>
                     </div>
-                    <div class="candidates-list" id="candidates-list">
-                        <div class="empty-state">
-                            <p>选择歌词并点击匹配推荐</p>
+
+                    <div class="matching-settings">
+                        <div class="form-group">
+                            <label for="search-query-input">🔍 自定义搜索提示词:</label>
+                            <input type="text" id="search-query-input" placeholder="留空默认使用当前歌词语义进行匹配..." style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 12px; outline: none; transition: border-color 0.2s;" />
+                        </div>
+                        <div class="form-group">
+                            <label for="motion-preference">🕺 画面运动感偏好:</label>
+                            <select id="motion-preference">
+                                <option value="any">任何节奏 (无限制)</option>
+                                <option value="low">宁静舒缓 (低运动度)</option>
+                                <option value="medium">律动适中 (中运动度)</option>
+                                <option value="high">激情动感 (高运动度)</option>
+                            </select>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <button id="find-matches-btn" class="btn btn-primary" style="padding: 8px 10px; font-size: 12px;" disabled>
+                                ⚡ 语义匹配此段
+                            </button>
+                            <button id="auto-match-all-btn" class="btn btn-accent" style="padding: 8px 10px; font-size: 12px;" disabled>
+                                🤖 一键智能匹配
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="manual-assign-settings" style="padding: 15px; border-bottom: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.005);">
+                        <div class="active-lyric-header" style="margin-bottom: 8px;">🛠️ 手动选择素材与时间轴</div>
+                        <div class="form-group" style="margin-bottom: 8px;">
+                            <label for="manual-video-select" style="font-size: 10px; color: var(--text-secondary);">选择素材视频:</label>
+                            <select id="manual-video-select" style="width: 100%; padding: 6px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px;">
+                                <option value="">-- 请选择索引库中的视频 --</option>
+                            </select>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: flex-end; margin-bottom: 5px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="manual-clip-start" style="font-size: 10px; color: var(--text-secondary);">起始时间轴 (秒):</label>
+                                <input type="number" id="manual-clip-start" min="0" step="0.1" value="0.0" style="width: 100%; padding: 5px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; font-family: var(--font-mono);" />
+                            </div>
+                            <button id="manual-assign-btn" class="btn btn-secondary" style="padding: 5px 0; font-size: 11px; width: 100%; font-weight: 500;" disabled>
+                                💾 应用此素材
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="candidates-container" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                        <div class="panel-header-sub">
+                            <h3>💡 AI 候选片段</h3>
+                            <span class="badge" id="candidates-count">Top 5</span>
+                        </div>
+                        <div class="candidates-list" id="candidates-list" style="flex: 1; overflow-y: auto;">
+                            <div class="empty-state">
+                                <p>选择歌词并点击匹配推荐</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -285,9 +357,69 @@
             <div class="modal-footer" id="modal-footer" style="display:none;">
                 <button id="modal-close-btn" class="btn btn-secondary">关闭</button>
             </div>
+            <div class="modal-running-actions" id="modal-running-actions" style="display:none; padding: 10px 15px; border-top: 1px solid var(--border-color); justify-content: flex-end; background: rgba(0,0,0,0.1);">
+                <button id="modal-cancel-btn" class="btn btn-secondary" style="border-color: rgba(255, 100, 100, 0.25); color: #ff6b6b; font-weight: 500; font-size: 12px; padding: 6px 15px;">取消任务</button>
+            </div>
+        </div>
+    </div>
+    <!-- Video & Transcript Browser Modal -->
+    <div class="modal-overlay" id="video-browser-modal" style="display:none; z-index: 1000;">
+        <div class="modal-card glass-card" style="max-width: 900px; width: 90%; height: 80vh; display: flex; flex-direction: column; padding: 20px;">
+            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 15px; border-bottom: 1px solid var(--border-color);">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">🎬 视频库与对白台词浏览器 (v6)</h3>
+                <button id="video-browser-close-btn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;">关闭</button>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: row !important; flex: 1; overflow: hidden; padding-top: 15px; gap: 20px;">
+                <!-- Left column: Video List -->
+                <div style="width: 250px; height: 100%; display: flex; flex-direction: column; border-right: 1px solid var(--border-color); padding-right: 15px; overflow-y: auto;">
+                    <h4 style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 8px;">📹 视频列表</h4>
+                    <div id="browser-video-list" style="display: flex; flex-direction: column; gap: 6px;">
+                        <!-- Video list items will be generated here -->
+                    </div>
+                </div>
+                <!-- Right column: Preview Player and Transcripts list -->
+                <div style="flex: 1; height: 100%; display: flex; flex-direction: column; overflow: hidden; gap: 15px;">
+                    <!-- Top: Mini Video preview -->
+                    <div style="height: 200px; background: #000; border-radius: 8px; overflow: hidden; display: flex; justify-content: center; align-items: center; position: relative;">
+                        <video id="browser-preview-player" controls muted style="width: 100%; height: 100%; object-fit: contain;"></video>
+                        <div id="browser-player-placeholder" style="position: absolute; color: var(--text-secondary); font-size: 12px; pointer-events: none;">
+                            选择视频以开启预览
+                        </div>
+                    </div>
+                    <!-- Bottom: Tab Panel for Transcripts vs Gemini Segments -->
+                    <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
+                        <!-- Tab Buttons -->
+                        <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 8px; align-items: center;">
+                            <button id="browser-tab-transcripts-btn" class="btn btn-secondary active" style="font-size: 11px; padding: 4px 10px; border-radius: 4px; background: rgba(0,242,254,0.12); border-color: rgba(0,242,254,0.25); color: #fff; border: 1px solid var(--border-color);">
+                                💬 对白台词
+                            </button>
+                            <button id="browser-tab-segments-btn" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; border-radius: 4px; color: var(--text-secondary); border: 1px solid transparent; background: transparent;">
+                                ⚡ Gemini 场景分析
+                            </button>
+                            <span class="badge" id="browser-transcript-count" style="font-size: 9px; padding: 2px 6px; margin-left: auto;">0 句</span>
+                        </div>
+                        
+                        <!-- Transcripts Container -->
+                        <div id="browser-transcript-list-container" style="display: block; flex: 1; min-height: 0; overflow: hidden;">
+                            <div id="browser-transcript-list" style="height: 320px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+                                <div class="empty-state" style="padding: 30px 0;"><p>选择左侧视频以加载台词对白</p></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Gemini Segments Container -->
+                        <div id="browser-segment-list-container" style="display: none; flex: 1; min-height: 0; overflow: hidden;">
+                            <div id="browser-segment-list" style="height: 320px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 8px;">
+                                <div class="empty-state" style="padding: 30px 0;"><p>选择左侧视频以加载 Gemini 场景分析</p></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Interactive debug console -->
+            <div id="browser-debug-console" style="margin-top: 10px; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; font-family: monospace; font-size: 10px; color: #a0c0a0; max-height: 60px; overflow-y: auto; white-space: pre-wrap; pointer-events: auto;">[Debug Console Ready - v7]</div>
         </div>
     </div>
 
-    <script src="/assets/app.js"></script>
+    <script src="/assets/app.js?v=7"></script>
 </body>
 </html>
