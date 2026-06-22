@@ -231,12 +231,44 @@
             }
             
             if (isRendering) {
-                // In headless rendering, HyperFrames blocks/aborts media network requests.
-                // The video tags cannot load the files and will not fire 'seeked'.
-                // We update currentTime synchronously and show the video immediately.
-                activeVideo.currentTime = clipTime;
-                showActiveVideo(activeIndex);
-                seekPromise = Promise.resolve();
+                // In headless rendering, wait for 'seeked' event to avoid black frames, with a fallback timeout
+                if (activeVideo._seekCleanup) {
+                    activeVideo._seekCleanup();
+                }
+                seekPromise = new Promise((resolve) => {
+                    let resolved = false;
+                    const timeoutId = setTimeout(() => {
+                        if (!resolved) {
+                            resolved = true;
+                            activeVideo.removeEventListener('seeked', onSeeked);
+                            activeVideo._seekCleanup = null;
+                            showActiveVideo(activeIndex);
+                            console.warn(`[seekTo] Seek timed out for video_${activeIndex} at time=${clipTime}`);
+                            resolve();
+                        }
+                    }, 200);
+                    
+                    const onSeeked = () => {
+                        if (!resolved) {
+                            resolved = true;
+                            clearTimeout(timeoutId);
+                            activeVideo.removeEventListener('seeked', onSeeked);
+                            activeVideo._seekCleanup = null;
+                            showActiveVideo(activeIndex);
+                            resolve();
+                        }
+                    };
+                    activeVideo.addEventListener('seeked', onSeeked);
+                    activeVideo._seekCleanup = () => {
+                        if (!resolved) {
+                            resolved = true;
+                            clearTimeout(timeoutId);
+                            activeVideo.removeEventListener('seeked', onSeeked);
+                            resolve();
+                        }
+                    };
+                    activeVideo.currentTime = clipTime;
+                });
             } else if ((isPlaying && timeDiff > 0.1) || (!isPlaying && timeDiff > 0.01)) {
                 // Clean up any pending seek listener on this video
                 if (activeVideo._seekCleanup) {
