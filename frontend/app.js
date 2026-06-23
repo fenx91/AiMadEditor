@@ -1,3 +1,9 @@
+import { apiFetch } from './js/api.js';
+import { calculateClipTime, detectSpeaker, findActiveLyricIndex, formatTime, shouldResync } from './js/playback.js';
+import { resolveEffectiveSlot } from './js/timeline-model.js';
+import { getEditorElements } from './js/dom.js';
+import { highlightPlayingTranscript, renderBrowserSegments, renderBrowserTranscripts } from './js/video-browser-renderers.js';
+
 // Global error logging for debugging
 window.addEventListener('error', (e) => {
     alert(`JS Error: ${e.message} at ${e.filename}:${e.lineno}:${e.colno}`);
@@ -38,131 +44,7 @@ let currentBrowserSegments = [];
 let currentBrowserTab = 'transcripts';
 
 // DOM elements
-const el = {
-    indexDirInput: document.getElementById('index-dir-input'),
-    indexDirBtn: document.getElementById('index-dir-btn'),
-    modelStatus: document.getElementById('model-status'),
-    
-    audioUploadBox: document.getElementById('audio-upload-box'),
-    lyricUploadBox: document.getElementById('lyric-upload-box'),
-    audioFileInput: document.getElementById('audio-file-input'),
-    lyricFileInput: document.getElementById('lyric-file-input'),
-    audioName: document.getElementById('audio-name'),
-    lyricName: document.getElementById('lyric-name'),
-    processMusicBtn: document.getElementById('process-music-btn'),
-    audioTrimmerCard: document.getElementById('audio-trimmer-card'),
-    audioTrimStart: document.getElementById('audio-trim-start'),
-    audioTrimEnd: document.getElementById('audio-trim-end'),
-    trimAudioBtn: document.getElementById('trim-audio-btn'),
-    
-    lyricsList: document.getElementById('lyrics-list'),
-    lyricsCount: document.getElementById('lyrics-count'),
-    
-    previewPlayerA: document.getElementById('preview-player-a'),
-    previewPlayerB: document.getElementById('preview-player-b'),
-    videoPlaceholder: document.getElementById('video-placeholder'),
-    monitorVideoName: document.getElementById('monitor-video-name'),
-    clipTrimmer: document.getElementById('clip-trimmer'),
-    trimmerRange: document.getElementById('trimmer-range'),
-    trimmerValue: document.getElementById('trimmer-value'),
-    trimmerMaxLabel: document.getElementById('trimmer-max-label'),
-    
-    playBtn: document.getElementById('play-btn'),
-    timeDisplay: document.getElementById('time-display'),
-    bpmDisplay: document.getElementById('bpm-display'),
-    waveformCanvas: document.getElementById('waveform-canvas'),
-    dialogueWaveformCanvas: document.getElementById('dialogue-waveform-canvas'),
-    timelineRuler: document.getElementById('timeline-ruler'),
-    playhead: document.getElementById('playhead'),
-    
-    lyricTrackItems: document.getElementById('lyric-track-items'),
-    videoTrackItems: document.getElementById('video-track-items'),
-    dialogueTrackItems: document.getElementById('dialogue-track-items'),
-    
-    activeLyricText: document.getElementById('active-lyric-text'),
-    activeLyricMeta: document.getElementById('active-lyric-meta'),
-    motionPreference: document.getElementById('motion-preference'),
-    findMatchesBtn: document.getElementById('find-matches-btn'),
-    candidatesList: document.getElementById('candidates-list'),
-    candidatesCount: document.getElementById('candidates-count'),
-    
-    filledSlotsCount: document.getElementById('filled-slots-count'),
-    totalSlotsCount: document.getElementById('total-slots-count'),
-    estimatedDuration: document.getElementById('estimated-duration'),
-    renderBtn: document.getElementById('render-btn'),
-    exportXmlBtn: document.getElementById('export-xml-btn'),
-    exportJsonBtn: document.getElementById('export-json-btn'),
-    rangeRenderEnable: document.getElementById('range-render-enable'),
-    rangeRenderStart: document.getElementById('range-render-start'),
-    rangeRenderEnd: document.getElementById('range-render-end'),
-    saveSetupBtn: document.getElementById('save-setup-btn'),
-    loadSetupBtn: document.getElementById('load-setup-btn'),
-    
-    modalOverlay: document.getElementById('modal-overlay'),
-    modalTitle: document.getElementById('modal-title'),
-    modalProgressBar: document.getElementById('modal-progress-bar'),
-    modalStatusMsg: document.getElementById('modal-status-msg'),
-    modalLogConsole: document.getElementById('modal-log-console'),
-    modalFooter: document.getElementById('modal-footer'),
-    modalCloseBtn: document.getElementById('modal-close-btn'),
-    musicVolumeSlider: document.getElementById('music-volume-slider'),
-    dialogueVolumeSlider: document.getElementById('dialogue-volume-slider'),
-    volumeMuteBtn: document.getElementById('volume-mute-btn'),
-    clearSlotBtn: document.getElementById('clear-slot-btn'),
-    autoMatchAllBtn: document.getElementById('auto-match-all-btn'),
-    
-    // New Trimmer Controls
-    trimmerInput: document.getElementById('trimmer-input'),
-    trimmerPlayBtn: document.getElementById('trimmer-play-btn'),
-    trimBtnSub1s: document.getElementById('trim-btn-sub-1s'),
-    trimBtnSub01s: document.getElementById('trim-btn-sub-01s'),
-    trimBtnAdd01s: document.getElementById('trim-btn-add-01s'),
-    trimBtnAdd1s: document.getElementById('trim-btn-add-1s'),
-    
-    // New Manual Match Controls
-    manualVideoSelect: document.getElementById('manual-video-select'),
-    manualClipStart: document.getElementById('manual-clip-start'),
-    manualAssignBtn: document.getElementById('manual-assign-btn'),
-    searchQueryInput: document.getElementById('search-query-input'),
-    
-    // Tabbed Script Planner Controls
-    tabPlannerBtn: document.getElementById('tab-planner-btn'),
-    tabMatcherBtn: document.getElementById('tab-matcher-btn'),
-    tabJsonBtn: document.getElementById('tab-json-btn'),
-    panelPlannerContent: document.getElementById('panel-planner-content'),
-    panelMatcherContent: document.getElementById('panel-matcher-content'),
-    panelJsonContent: document.getElementById('panel-json-content'),
-    jsonEditorTextarea: document.getElementById('json-editor-textarea'),
-    applyJsonEditBtn: document.getElementById('apply-json-edit-btn'),
-    userVisionInput: document.getElementById('user-vision-input'),
-    generateScriptBtn: document.getElementById('generate-script-btn'),
-    regenerateScriptBtn: document.getElementById('regenerate-script-btn'),
-    scriptStatusBadge: document.getElementById('script-status-badge'),
-    scriptLinesList: document.getElementById('script-lines-list'),
-    applyScriptContainer: document.getElementById('apply-script-container'),
-    applyScriptBtn: document.getElementById('apply-script-btn'),
-    scriptHighLevelPanel: document.getElementById('script-high-level-panel'),
-    toggleHighLevelBtn: document.getElementById('toggle-high-level-btn'),
-    highLevelContent: document.getElementById('high-level-content'),
-    
-    // Recommended story vision elements
-    recommendedVisionsContainer: document.getElementById('recommended-visions-container'),
-    recommendedVisionsList: document.getElementById('recommended-visions-list'),
-    visionsLoading: document.getElementById('visions-loading'),
-    
-    // Modal Cancel Buttons
-    modalRunningActions: document.getElementById('modal-running-actions'),
-    modalCancelBtn: document.getElementById('modal-cancel-btn'),
-    
-    // Video Browser Modal Controls
-    videoBrowserModal: document.getElementById('video-browser-modal'),
-    videoBrowserCloseBtn: document.getElementById('video-browser-close-btn'),
-    browserVideoList: document.getElementById('browser-video-list'),
-    browserPreviewPlayer: document.getElementById('browser-preview-player'),
-    browserPlayerPlaceholder: document.getElementById('browser-player-placeholder'),
-    browserTranscriptCount: document.getElementById('browser-transcript-count'),
-    browserTranscriptList: document.getElementById('browser-transcript-list')
-};
+const el = getEditorElements();
 
 // Collapsible panels initialization in the right sidebar
 function initCollapsiblePanels() {
@@ -189,7 +71,7 @@ function initCollapsiblePanels() {
 async function init() {
     initCollapsiblePanels();
     try {
-        const res = await fetch('/api/videos');
+        const res = await apiFetch('/api/videos');
         if (res.ok) {
             allIndexedVideos = await res.json();
             updateModelStatus(true, `已索引 ${allIndexedVideos.length} 个视频`);
@@ -226,7 +108,7 @@ function updateVolume() {
         if (isPlaying) {
             const curr = audioEl.currentTime;
             if (songData) {
-                const activeIndex = songData.lyrics.findIndex(l => curr >= l.start && curr < l.end);
+                const activeIndex = findActiveLyricIndex(songData.lyrics, curr);
                 const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex) : null;
                 if (effective && effective.keep_audio) {
                     shouldKeepAudio = true;
@@ -275,61 +157,7 @@ function updateVolume() {
 }
 
 function getEffectiveSlot(index) {
-    if (!songData) return null;
-    if (timelineSlots[index]) {
-        return {
-            ...timelineSlots[index],
-            isFallback: false
-        };
-    }
-    // Find nearest previous filled slot (above source)
-    for (let j = index - 1; j >= 0; j--) {
-        if (timelineSlots[j]) {
-            const baseSlot = timelineSlots[j];
-            const currentLyric = songData.lyrics[index];
-            const baseLyric = songData.lyrics[j];
-            
-            let clipStart = baseSlot.clip_start + (currentLyric.start - baseLyric.start);
-            const duration = currentLyric.end - currentLyric.start;
-            
-            if (baseSlot.video_duration && clipStart > baseSlot.video_duration - 0.1) {
-                clipStart = Math.max(0, baseSlot.video_duration - 0.1);
-            }
-            
-            return {
-                video_path: baseSlot.video_path,
-                video_name: baseSlot.video_name,
-                proxy_url: baseSlot.proxy_url,
-                clip_start: clipStart,
-                clip_duration: duration,
-                video_duration: baseSlot.video_duration,
-                isFallback: true,
-                fallbackFromIndex: j,
-                keep_audio: baseSlot.keep_audio,
-                transcript: baseSlot.transcript,
-                speaker: baseSlot.speaker
-            };
-        }
-    }
-    // If no previous filled slot, find the first filled slot in the entire timeline
-    const firstFilled = timelineSlots.find(s => s !== null);
-    if (firstFilled) {
-        const currentLyric = songData.lyrics[index];
-        return {
-            video_path: firstFilled.video_path,
-            video_name: firstFilled.video_name,
-            proxy_url: firstFilled.proxy_url,
-            clip_start: firstFilled.clip_start,
-            clip_duration: currentLyric.end - currentLyric.start,
-            video_duration: firstFilled.video_duration,
-            isFallback: true,
-            fallbackFromIndex: timelineSlots.indexOf(firstFilled),
-            keep_audio: firstFilled.keep_audio,
-            transcript: firstFilled.transcript,
-            speaker: firstFilled.speaker
-        };
-    }
-    return null;
+    return resolveEffectiveSlot(timelineSlots, songData?.lyrics, index);
 }
 
 function hasVideoOverlap(cand, index) {
@@ -876,7 +704,7 @@ async function indexDirectory() {
     updateModalProgress(20, "后端解析视频帧特征中...");
     
     try {
-        const res = await fetch('/api/index_videos', {
+        const res = await apiFetch('/api/index_videos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ directory: dir, force_refresh: forceRefresh })
@@ -890,7 +718,7 @@ async function indexDirectory() {
             updateModelStatus(true, `已索引 ${data.indexed_count} 个视频`);
             
             // Reload all indexed videos
-            const listRes = await fetch('/api/videos');
+            const listRes = await apiFetch('/api/videos');
             if (listRes.ok) {
                 allIndexedVideos = await listRes.json();
                 populateManualVideoSelect();
@@ -926,7 +754,7 @@ async function processMusic() {
     updateModalProgress(40, "正在提取 BPM 与瞬态鼓点...");
     
     try {
-        const res = await fetch('/api/upload_music', {
+        const res = await apiFetch('/api/upload_music', {
             method: 'POST',
             body: formData
         });
@@ -1012,7 +840,7 @@ async function trimMusic() {
     updateModalProgress(40, "正在提取节奏特征与同步歌词...");
     
     try {
-        const res = await fetch('/api/trim_music', {
+        const res = await apiFetch('/api/trim_music', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1311,27 +1139,10 @@ function updatePlayheadPosition() {
     }
 }
 
-// Detect speaker from segment metadata for subtitle coloring
-function detectSpeaker(summary, transcript) {
-    if (!summary) return 'unknown';
-    const s = summary.toLowerCase();
-    const t = transcript ? transcript.toLowerCase() : '';
-    if (s.includes('tayama') || s.includes('田山') || t.includes('田山')) {
-        return 'tayama';
-    }
-    if (s.includes('sasaki') || s.includes('佐佐木') || t.includes('佐佐木')) {
-        return 'sasaki';
-    }
-    if (s.includes('yamada') || s.includes('山田') || t.includes('山田')) {
-        return 'yamada';
-    }
-    return 'unknown';
-}
-
 function updateGlobalPreview(curr) {
     if (!songData) return;
     
-    const activeIndex = songData.lyrics.findIndex(l => curr >= l.start && curr < l.end);
+    const activeIndex = findActiveLyricIndex(songData.lyrics, curr);
     const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex) : null;
     
     // 1. Update Monitor Lyric Subtitle Overlay (Bottom)
@@ -1394,17 +1205,25 @@ function updateGlobalPreview(curr) {
         }
         
         // Calculate the target time in the video
-        const clipTime = effective.clip_start + (curr - songData.lyrics[activeIndex].start);
+        const clipTime = calculateClipTime(effective, songData.lyrics[activeIndex], curr);
         
         // Control play/pause & precise sync
         if (isPlaying) {
             if (activePlayer.paused) {
-                activePlayer.play().catch(() => {});
-                activePlayer.currentTime = clipTime;
+                if (activePlayer.dataset.isStarting !== "true") {
+                    activePlayer.dataset.isStarting = "true";
+                    activePlayer.currentTime = clipTime;
+                    activePlayer.play().then(() => {
+                        activePlayer.dataset.isStarting = "false";
+                    }).catch((err) => {
+                        console.warn("Play failed or aborted:", err);
+                        activePlayer.dataset.isStarting = "false";
+                    });
+                }
             } else {
-                const timeDiff = Math.abs(activePlayer.currentTime - clipTime);
-                // Only seek if sync drift is significant (e.g. > 450ms) to ensure smooth seamless playback for continuous clips
-                if (timeDiff > 0.45) {
+                activePlayer.dataset.isStarting = "false";
+                // Only seek when drift is significant, keeping continuous clips smooth.
+                if (shouldResync(activePlayer.currentTime, clipTime)) {
                     activePlayer.currentTime = clipTime;
                 }
             }
@@ -1443,13 +1262,6 @@ function updateGlobalPreview(curr) {
         
         lastPreviewSlotIndex = null;
     }
-}
-
-function formatTime(secs) {
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    const ms = Math.floor((secs % 1) * 10);
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms}`;
 }
 
 // Render lyrics list & timeline items
@@ -1815,7 +1627,7 @@ async function findMatches() {
     `;
     
     try {
-        const res = await fetch('/api/match', {
+        const res = await apiFetch('/api/match', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2149,7 +1961,7 @@ async function autoMatchAllSlots() {
             });
             
             // Fetch batch match API
-            const res = await fetch('/api/batch_match', {
+            const res = await apiFetch('/api/batch_match', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ items })
@@ -2349,7 +2161,7 @@ async function renderVideo() {
     }
 
     try {
-        const res = await fetch('/api/render', {
+        const res = await apiFetch('/api/render', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2418,7 +2230,7 @@ async function exportPremiereXml() {
     appendModalLog("正在构建时间轴剪辑决策点...");
     
     try {
-        const res = await fetch('/api/export_xml', {
+        const res = await apiFetch('/api/export_xml', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2595,7 +2407,7 @@ async function saveSetup(isSilent = false) {
     }
     
     try {
-        const res = await fetch('/api/save_setup', {
+        const res = await apiFetch('/api/save_setup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -2639,7 +2451,7 @@ async function loadSetup(isSilent = false, setupName = "default") {
         showModal("📂 选择读取的微调版本", "正在拉取历史存盘列表...");
         appendModalLog("发送 GET 请求至 /api/list_setups...");
         try {
-            const listRes = await fetch('/api/list_setups');
+            const listRes = await apiFetch('/api/list_setups');
             if (!listRes.ok) {
                 updateModalProgress(100, "拉取列表失败！");
                 el.modalFooter.style.display = 'block';
@@ -2705,7 +2517,7 @@ async function loadSetup(isSilent = false, setupName = "default") {
     }
     
     try {
-        const res = await fetch(`/api/load_setup?name=${encodeURIComponent(setupName)}`);
+        const res = await apiFetch(`/api/load_setup?name=${encodeURIComponent(setupName)}`);
         if (!res.ok) {
             if (!isSilent) {
                 const err = await res.json();
@@ -2916,6 +2728,7 @@ function switchActivePlayer(targetSrc, targetTime) {
     if (nextActive !== activePlayer) {
         activePlayer.pause();
         activePlayer.style.display = 'none';
+        activePlayer.dataset.isStarting = "false"; // Reset starting status on old player
         
         activePlayer = nextActive;
         preloadPlayer = nextPreload;
@@ -2960,7 +2773,7 @@ async function preloadTestData() {
         el.audioName.textContent = "Adam Lambert - Whataya Want from Me_H.mp3 (加载中...)";
         el.lyricName.textContent = "Adam Lambert - Whataya Want from Me_H.lrc (加载中...)";
         
-        const res = await fetch('/api/load_test_data', { method: 'POST' });
+        const res = await apiFetch('/api/load_test_data', { method: 'POST' });
         if (res.ok) {
             const data = await res.json();
             songData = data;
@@ -3003,7 +2816,7 @@ async function preloadTestData() {
             console.log("Test data preloaded successfully!");
             // Auto-load last saved V-Tiao micro-adjust configuration (load the latest setup)
             try {
-                const listRes = await fetch('/api/list_setups');
+                const listRes = await apiFetch('/api/list_setups');
                 if (listRes.ok) {
                     const setups = await listRes.json();
                     if (setups && setups.length > 0) {
@@ -3195,8 +3008,8 @@ async function generateScriptPlan(clearCache = false) {
     if (clearCache) {
         try {
             await Promise.all([
-                fetch('/api/script_outline_cache', { method: 'DELETE' }),
-                fetch('/api/match_cache', { method: 'DELETE' })
+                apiFetch('/api/script_outline_cache', { method: 'DELETE' }),
+                apiFetch('/api/match_cache', { method: 'DELETE' })
             ]);
         } catch (e) {
             console.warn('Failed to clear caches:', e);
@@ -3217,7 +3030,7 @@ async function generateScriptPlan(clearCache = false) {
     }));
     
     try {
-        const res = await fetch('/api/generate_script_plan', {
+        const res = await apiFetch('/api/generate_script_plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3278,7 +3091,7 @@ async function loadScriptPlanCacheSilently() {
     const userVision = (el.userVisionInput && el.userVisionInput.value.trim()) ? el.userVisionInput.value.trim() : defaultVision;
     
     try {
-        const res = await fetch('/api/get_script_plan_cache', {
+        const res = await apiFetch('/api/get_script_plan_cache', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3334,7 +3147,7 @@ async function fetchStoryVisionRecommendations() {
             }))
         };
         
-        const res = await fetch('/api/recommend_story_visions', {
+        const res = await apiFetch('/api/recommend_story_visions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -3594,7 +3407,7 @@ async function regenerateScriptLine(index) {
     }
     
     try {
-        const res = await fetch('/api/regenerate_script_line', {
+        const res = await apiFetch('/api/regenerate_script_line', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3673,7 +3486,7 @@ async function openVideoBrowser() {
     // Fetch latest videos and populate list
     try {
         browserLog("openVideoBrowser: Fetching fresh list of videos from /api/videos...");
-        const res = await fetch('/api/videos');
+        const res = await apiFetch('/api/videos');
         if (res.ok) {
             allIndexedVideos = await res.json();
             browserLog(`openVideoBrowser: Fetched ${allIndexedVideos.length} videos from API.`);
@@ -3822,7 +3635,7 @@ async function selectBrowserVideo(video) {
     try {
         const url = `/api/videos/${video.id}/transcripts`;
         browserLog(`selectBrowserVideo: Fetching transcripts from "${url}"`);
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         if (res.ok) {
             currentBrowserTranscripts = await res.json();
             browserLog(`selectBrowserVideo: Transcripts loaded: ${currentBrowserTranscripts.length}`);
@@ -3837,7 +3650,7 @@ async function selectBrowserVideo(video) {
     try {
         const url = `/api/videos/${video.id}/segments`;
         browserLog(`selectBrowserVideo: Fetching segments from "${url}"`);
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         if (res.ok) {
             currentBrowserSegments = await res.json();
             browserLog(`selectBrowserVideo: Segments loaded: ${currentBrowserSegments.length}`);
@@ -3850,153 +3663,6 @@ async function selectBrowserVideo(video) {
     
     // Render the active tab
     renderActiveBrowserTab();
-}
-
-function renderBrowserTranscripts(transcripts) {
-    browserLog(`renderBrowserTranscripts: Starting render for ${transcripts.length} entries.`);
-    const listContainer = document.getElementById('browser-transcript-list');
-    const countBadge = document.getElementById('browser-transcript-count');
-    const player = document.getElementById('browser-preview-player');
-    
-    if (!listContainer) {
-        browserLog("renderBrowserTranscripts ERROR: #browser-transcript-list not found.");
-        return;
-    }
-    
-    // Programmatically ensure dimensions and flex behavior to override cache or parent flex collapse
-    listContainer.style.height = '320px';
-    listContainer.style.flexShrink = '0';
-    
-    listContainer.innerHTML = '';
-    if (countBadge) countBadge.textContent = `${transcripts.length} 句`;
-    
-    if (transcripts.length === 0) {
-        browserLog("renderBrowserTranscripts: 0 transcripts to display.");
-        const empty = document.createElement('div');
-        empty.className = 'empty-state';
-        empty.style.padding = '30px 0';
-        empty.style.textAlign = 'center';
-        empty.style.color = '#9a9ab0';
-        empty.innerHTML = '<p>该视频未检测到或未生成台词对白</p>';
-        listContainer.appendChild(empty);
-        return;
-    }
-    
-    transcripts.forEach(transcript => {
-        const item = document.createElement('div');
-        item.className = 'browser-transcript-item';
-        item.dataset.startTime = transcript.start_time;
-        item.dataset.endTime = transcript.end_time || (transcript.start_time + 3.0);
-        
-        // Hardcoded inline styles for transcript list item
-        item.style.display = 'flex';
-        item.style.gap = '12px';
-        item.style.alignItems = 'flex-start';
-        item.style.padding = '8px 10px';
-        item.style.borderRadius = '6px';
-        item.style.cursor = 'pointer';
-        item.style.background = 'rgba(255, 255, 255, 0.01)';
-        item.style.border = '1px solid transparent';
-        item.style.transition = 'all 0.2s ease';
-        
-        const timeTag = document.createElement('span');
-        timeTag.className = 'browser-transcript-time';
-        timeTag.textContent = formatTime(transcript.start_time);
-        
-        // Hardcoded inline styles for time tag
-        timeTag.style.fontFamily = "'JetBrains Mono', monospace";
-        timeTag.style.color = '#00f0ff';
-        timeTag.style.fontSize = '11px';
-        timeTag.style.fontWeight = '500';
-        timeTag.style.background = 'rgba(0, 242, 254, 0.08)';
-        timeTag.style.padding = '2px 6px';
-        timeTag.style.borderRadius = '4px';
-        timeTag.style.flexShrink = '0';
-        
-        const textSpan = document.createElement('span');
-        textSpan.className = 'browser-transcript-text';
-        textSpan.textContent = transcript.text;
-        
-        // Hardcoded inline styles for transcript text
-        textSpan.style.color = '#9a9ab0';
-        textSpan.style.fontSize = '12px';
-        textSpan.style.lineHeight = '1.4';
-        textSpan.style.flexGrow = '1';
-        textSpan.style.wordBreak = 'break-word';
-        textSpan.style.transition = 'color 0.2s ease';
-        
-        item.appendChild(timeTag);
-        item.appendChild(textSpan);
-        
-        // Hover listeners
-        item.addEventListener('mouseenter', () => {
-            if (!item.classList.contains('playing')) {
-                item.style.background = 'rgba(255, 255, 255, 0.04)';
-                item.style.borderColor = 'rgba(255, 255, 255, 0.05)';
-                textSpan.style.color = '#ffffff';
-            }
-        });
-        item.addEventListener('mouseleave', () => {
-            if (!item.classList.contains('playing')) {
-                item.style.background = 'rgba(255, 255, 255, 0.01)';
-                item.style.borderColor = 'transparent';
-                textSpan.style.color = '#9a9ab0';
-            }
-        });
-        
-        item.addEventListener('click', () => {
-            browserLog(`Transcript item click: seeking player to start_time: ${transcript.start_time}s`);
-            if (player) {
-                player.currentTime = transcript.start_time;
-                player.play().catch(e => console.log("Play failed on seek:", e));
-            }
-            highlightPlayingTranscript(item);
-        });
-        
-        listContainer.appendChild(item);
-    });
-    const compStyle = window.getComputedStyle(listContainer);
-    browserLog(`renderBrowserTranscripts: Completed rendering ${transcripts.length} nodes.`);
-    browserLog(`[DIAGNOSTIC] listContainer: clientHeight=${listContainer.clientHeight}px, offsetHeight=${listContainer.offsetHeight}px, scrollHeight=${listContainer.scrollHeight}px`);
-    browserLog(`[DIAGNOSTIC] listContainer Styles: display=${compStyle.display}, height=${compStyle.height}, max-height=${compStyle.maxHeight}, flexShrink=${compStyle.flexShrink}`);
-    
-    // Trace parent hierarchy
-    let parent = listContainer.parentElement;
-    let depth = 1;
-    while (parent && parent.tagName !== 'BODY') {
-        const pStyle = window.getComputedStyle(parent);
-        browserLog(`[DIAGNOSTIC] Parent L${depth} (<${parent.tagName}> id="${parent.id || ''}" class="${parent.className || ''}"): display=${pStyle.display}, height=${pStyle.height}, maxHeight=${pStyle.maxHeight}, flex=${pStyle.flex || (pStyle.flexGrow + ' ' + pStyle.flexShrink + ' ' + pStyle.flexBasis)}`);
-        parent = parent.parentElement;
-        depth++;
-    }
-}
-
-function highlightPlayingTranscript(activeItem) {
-    const listContainer = document.getElementById('browser-transcript-list');
-    if (!listContainer) return;
-    
-    const items = listContainer.querySelectorAll('.browser-transcript-item');
-    items.forEach(item => {
-        const textSpan = item.querySelector('.browser-transcript-text');
-        if (item === activeItem) {
-            item.classList.add('playing');
-            item.style.background = 'rgba(0, 242, 254, 0.05)';
-            item.style.borderColor = 'rgba(0, 242, 254, 0.2)';
-            if (textSpan) {
-                textSpan.style.color = '#ffffff';
-                textSpan.style.fontWeight = '500';
-            }
-            item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        } else {
-            item.classList.remove('playing');
-            item.style.background = 'rgba(255, 255, 255, 0.01)';
-            item.style.borderColor = 'transparent';
-            if (textSpan) {
-                textSpan.style.color = 'var(--text-secondary)';
-                textSpan.style.fontWeight = 'normal';
-            }
-        }
-    });
 }
 
 // Synchronize transcript scroll position on timeupdate
@@ -4078,72 +3744,9 @@ function renderActiveBrowserTab() {
     
     if (currentBrowserTab === 'transcripts') {
         if (countBadge) countBadge.textContent = `${currentBrowserTranscripts.length} 句`;
-        renderBrowserTranscripts(currentBrowserTranscripts);
+        renderBrowserTranscripts(currentBrowserTranscripts, browserLog);
     } else {
         if (countBadge) countBadge.textContent = `${currentBrowserSegments.length} 个片段`;
-        renderBrowserSegments(currentBrowserSegments);
+        renderBrowserSegments(currentBrowserSegments, browserLog);
     }
-}
-
-function renderBrowserSegments(segments) {
-    const listContainer = document.getElementById('browser-segment-list');
-    const player = document.getElementById('browser-preview-player');
-    
-    if (!listContainer) return;
-    
-    listContainer.innerHTML = '';
-    
-    if (segments.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'empty-state';
-        empty.style.padding = '30px 0';
-        empty.style.textAlign = 'center';
-        empty.style.color = '#9a9ab0';
-        empty.innerHTML = '<p>该视频暂无 Gemini 场景分析数据</p>';
-        listContainer.appendChild(empty);
-        return;
-    }
-    
-    segments.forEach(seg => {
-        const item = document.createElement('div');
-        item.className = 'browser-segment-item';
-        item.style.cssText = "cursor: pointer; padding: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); font-size: 11px; display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); transition: all 0.2s;";
-        
-        // Hover effect via JS
-        item.addEventListener('mouseenter', () => {
-            item.style.background = 'rgba(255, 255, 255, 0.05)';
-            item.style.borderColor = 'rgba(0, 242, 254, 0.3)';
-        });
-        item.addEventListener('mouseleave', () => {
-            item.style.background = 'rgba(255, 255, 255, 0.02)';
-            item.style.borderColor = 'var(--border-color)';
-        });
-        
-        const motionEmoji = seg.motion_intensity === 'high' ? '🔥 高' : seg.motion_intensity === 'medium' ? '⚡ 中' : '❄️ 低';
-        
-        item.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.04); padding-bottom: 4px; margin-bottom: 2px;">
-                <span style="font-family: monospace; font-size: 10px; color: var(--color-primary); font-weight: bold;">[${seg.start_time.toFixed(1)}s - ${seg.end_time.toFixed(1)}s]</span>
-                <span style="font-size: 9px; padding: 1px 4px; background: rgba(255,255,255,0.06); border-radius: 3px; color: #ccc;">运动: ${motionEmoji}</span>
-            </div>
-            <div><strong>🎬 画面描述:</strong> <span style="color: #eee;">${seg.summary}</span></div>
-            ${seg.visual_style ? `<div><strong>🎨 视觉风格:</strong> <span style="color: #ccc;">${seg.visual_style}</span></div>` : ''}
-            ${seg.emotion_flow ? `<div><strong>❤️ 情感氛围:</strong> <span style="color: #ccc;">${seg.emotion_flow}</span></div>` : ''}
-            ${seg.tags && seg.tags.length > 0 ? `
-            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
-                ${seg.tags.map(t => `<span style="background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.15); border-radius: 3px; padding: 1px 4px; font-size: 8px; color: var(--color-primary);">${t}</span>`).join('')}
-            </div>
-            ` : ''}
-        `;
-        
-        item.addEventListener('click', () => {
-            if (player) {
-                player.currentTime = seg.start_time;
-                player.play().catch(() => {});
-                browserLog(`Seeking preview player to segment start: ${seg.start_time.toFixed(1)}s`);
-            }
-        });
-        
-        listContainer.appendChild(item);
-    });
 }
