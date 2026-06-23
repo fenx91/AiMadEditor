@@ -199,6 +199,24 @@ def analyze_audio_rhythm(audio_path):
             "waveform": []
         }
 
+# Add a real editable slot for music before the first timed lyric.
+def ensure_intro_segment(segments, label="前奏 / Intro", threshold=0.05):
+    if not segments:
+        return segments
+
+    first_start = float(segments[0].get("start", 0.0))
+    if first_start <= threshold:
+        return segments
+
+    intro = {
+        "start": 0.0,
+        "end": round(first_start, 3),
+        "text": label,
+        "is_intro": True,
+    }
+    return [intro, *segments]
+
+
 # Full music analysis (audio + lyrics)
 def analyze_music(audio_path, lyric_path=None, lyric_text=None, preparsed_lyrics=None):
     # 1. Analyze audio
@@ -242,6 +260,8 @@ def analyze_music(audio_path, lyric_path=None, lyric_text=None, preparsed_lyrics
         else:
             lyrics_segments = parse_txt(lyric_text, duration)
             
+    lyrics_segments = ensure_intro_segment(lyrics_segments)
+
     # Combine lyrics with nearest beats for rhythmic slotting
     # For each lyric segment, we find the beats that fall within its [start, end] duration.
     # This helps the frontend visualize beats inside lyric segments.

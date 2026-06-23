@@ -38,8 +38,6 @@ export function getEditorElements() {
     playhead: document.getElementById('playhead'),
     
     lyricTrackItems: document.getElementById('lyric-track-items'),
-    videoTrackItems: document.getElementById('video-track-items'),
-    dialogueTrackItems: document.getElementById('dialogue-track-items'),
     
     activeLyricText: document.getElementById('active-lyric-text'),
     activeLyricMeta: document.getElementById('active-lyric-meta'),

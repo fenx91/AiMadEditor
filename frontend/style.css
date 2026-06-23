@@ -1291,3 +1291,93 @@ video::-umd-media-controls-fullscreen-button {
     max-height: 2000px;
 }
 
+/* Three-track timeline: music, dialogue, lyrics */
+.timeline-track-stack {
+    position: relative;
+    min-width: 100%;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.timeline-track-row {
+    position: relative;
+    width: 100%;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+    overflow: hidden;
+}
+
+.music-track-row {
+    height: 58px;
+    background: rgba(0, 242, 254, 0.025);
+}
+
+.dialogue-track-row {
+    height: 42px;
+    background: rgba(255, 170, 0, 0.018);
+}
+
+.lyric-track-row {
+    height: 42px;
+    background: rgba(127, 0, 255, 0.02);
+}
+
+.track-row-label {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    z-index: 4;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(8, 8, 18, 0.78);
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    pointer-events: none;
+}
+
+#waveform-canvas,
+#dialogue-waveform-canvas {
+    width: 100%;
+    display: block;
+}
+
+.lyric-track-row .track-items {
+    height: 42px;
+    margin: 0;
+    border: 0;
+}
+
+.track-block.lyric-block {
+    top: 5px;
+    height: 32px;
+    box-sizing: border-box;
+    background: linear-gradient(90deg, rgba(127, 0, 255, 0.16), rgba(95, 73, 255, 0.12));
+    border-color: rgba(151, 112, 255, 0.3);
+    color: rgba(236, 231, 255, 0.82);
+}
+
+.track-block.lyric-block:hover {
+    border-color: rgba(0, 242, 254, 0.65);
+    background: rgba(0, 242, 254, 0.09);
+    color: #fff;
+}
+
+.track-block.lyric-block.active {
+    border-color: var(--color-primary);
+    background: rgba(0, 242, 254, 0.16);
+    color: #fff;
+    box-shadow: inset 0 0 0 1px rgba(0, 242, 254, 0.15), 0 0 9px rgba(0, 242, 254, 0.25);
+}
+
+.timeline-track-stack > .playhead {
+    height: 100%;
+}
+
+.track-block.lyric-block.intro-block {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.07), rgba(127, 0, 255, 0.12));
+    border-style: dashed;
+    border-color: rgba(199, 181, 255, 0.45);
+    color: rgba(235, 229, 255, 0.9);
+    font-style: italic;
+}
+

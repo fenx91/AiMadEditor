@@ -11,6 +11,18 @@ export function shouldResync(actualTime, expectedTime, threshold = 0.45) {
     return Math.abs(actualTime - expectedTime) > threshold;
 }
 
+export function mutePreloadPlayer(preloadPlayer, activePlayer) {
+    if (preloadPlayer && preloadPlayer !== activePlayer) {
+        preloadPlayer.muted = true;
+    }
+}
+
+export function seekToLyric(audioPlayer, lyric) {
+    if (!audioPlayer || !lyric || !Number.isFinite(lyric.start)) return false;
+    audioPlayer.currentTime = lyric.start;
+    return true;
+}
+
 export function formatTime(seconds) {
     const minutes = Math.floor(seconds / 60);
     const wholeSeconds = Math.floor(seconds % 60);

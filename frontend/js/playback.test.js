@@ -6,6 +6,8 @@ import {
     detectSpeaker,
     findActiveLyricIndex,
     formatTime,
+    mutePreloadPlayer,
+    seekToLyric,
     shouldResync,
 } from './playback.js';
 
@@ -20,9 +22,27 @@ test('playback calculations preserve timeline behavior', () => {
 });
 
 
+test('muting the preload player never interrupts active dialogue audio', () => {
+    const activePlayer = { muted: false };
+    const preloadPlayer = { muted: false };
+
+    mutePreloadPlayer(preloadPlayer, activePlayer);
+
+    assert.equal(activePlayer.muted, false);
+    assert.equal(preloadPlayer.muted, true);
+});
+
+
 test('speaker detection keeps the existing character mapping', () => {
     assert.equal(detectSpeaker('Tayama at the store', ''), 'tayama');
     assert.equal(detectSpeaker('scene', '佐佐木回答'), 'sasaki');
     assert.equal(detectSpeaker('scene', '山田走进来'), 'yamada');
     assert.equal(detectSpeaker('scene', 'ordinary dialogue'), 'unknown');
+});
+
+test('clicking a lyric block seeks the music clock to that lyric', () => {
+    const audioPlayer = { currentTime: 0 };
+
+    assert.equal(seekToLyric(audioPlayer, { start: 12.5 }), true);
+    assert.equal(audioPlayer.currentTime, 12.5);
 });

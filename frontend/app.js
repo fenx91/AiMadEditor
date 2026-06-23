@@ -1,5 +1,5 @@
 import { apiFetch } from './js/api.js';
-import { calculateClipTime, detectSpeaker, findActiveLyricIndex, formatTime, shouldResync } from './js/playback.js';
+import { calculateClipTime, detectSpeaker, findActiveLyricIndex, formatTime, mutePreloadPlayer, seekToLyric, shouldResync } from './js/playback.js';
 import { resolveEffectiveSlot } from './js/timeline-model.js';
 import { getEditorElements } from './js/dom.js';
 import { highlightPlayingTranscript, renderBrowserSegments, renderBrowserTranscripts } from './js/video-browser-renderers.js';
@@ -187,81 +187,35 @@ function hasVideoOverlap(cand, index) {
 
 function refreshTimelineBlocks() {
     if (!songData) return;
-    
+
     for (let i = 0; i < songData.lyrics.length; i++) {
-        const block = document.getElementById(`video-track-block-${i}`);
-        if (!block) continue;
-        
         const slot = timelineSlots[i];
-        
-        // Update Dialogue track block
-        const dialogueBlock = document.getElementById(`dialogue-track-block-${i}`);
-        if (dialogueBlock) {
-            if (slot && slot.transcript) {
-                dialogueBlock.className = "track-block dialogue-block filled";
-                dialogueBlock.innerHTML = `🎙️ "${slot.transcript}"`;
-            } else {
-                dialogueBlock.className = "track-block dialogue-block empty";
-                dialogueBlock.innerHTML = `<em>无台词</em>`;
-            }
-            if (activeSlotIndex === i) {
-                dialogueBlock.classList.add('active');
-            }
-        }
-        
+        const effective = slot ? null : getEffectiveSlot(i);
+        const statusText = document.getElementById(`lyric-slot-status-${i}`);
+        const lyricItem = document.querySelector(`.lyric-item[data-index="${i}"]`);
+
         if (slot) {
-            block.className = "track-block video-block";
-            if (activeSlotIndex === i) {
-                block.classList.add('active');
-            }
-            const micBadge = slot.keep_audio ? '<span class="mic-badge" style="font-size: 10px; margin-right: 4px; padding: 1px 3px; background: rgba(0, 242, 254, 0.2); border: 1px solid rgba(0, 242, 254, 0.4); border-radius: 3px;" title="已启用原声混合">🎙️</span>' : '';
-            block.innerHTML = `${micBadge}<strong>${slot.video_name}</strong> (从 ${slot.clip_start.toFixed(1)}s)`;
-            
-            const statusText = document.getElementById(`lyric-slot-status-${i}`);
             if (statusText) {
                 statusText.className = "lyric-slot-status filled";
                 statusText.innerHTML = `🟢 <span>已匹配: ${slot.video_name}</span>`;
             }
-            const lyricItem = document.querySelector(`.lyric-item[data-index="${i}"]`);
-            if (lyricItem) lyricItem.classList.add('filled');
-        } else {
-            const effective = getEffectiveSlot(i);
-            if (effective) {
-                block.className = "track-block video-block fallback";
-                if (activeSlotIndex === i) {
-                    block.classList.add('active');
-                }
-                block.innerHTML = `<span class="fallback-label">延续 #${effective.fallbackFromIndex + 1}: ${effective.video_name}</span> (从 ${effective.clip_start.toFixed(1)}s)`;
-                
-                const statusText = document.getElementById(`lyric-slot-status-${i}`);
-                if (statusText) {
-                    statusText.className = "lyric-slot-status fallback";
-                    statusText.innerHTML = `🔵 <span>延续: ${effective.video_name}</span>`;
-                }
-                const lyricItem = document.querySelector(`.lyric-item[data-index="${i}"]`);
-                if (lyricItem) lyricItem.classList.remove('filled');
-            } else {
-                block.className = "track-block video-block empty";
-                if (activeSlotIndex === i) {
-                    block.classList.add('active');
-                }
-                block.innerHTML = `<em>空槽位</em>`;
-                
-                const statusText = document.getElementById(`lyric-slot-status-${i}`);
-                if (statusText) {
-                    statusText.className = "lyric-slot-status";
-                    statusText.innerHTML = `<span class="dot-indicator"></span> <span>未匹配素材</span>`;
-                }
-                const lyricItem = document.querySelector(`.lyric-item[data-index="${i}"]`);
-                if (lyricItem) lyricItem.classList.remove('filled');
+            lyricItem?.classList.add('filled');
+        } else if (effective) {
+            if (statusText) {
+                statusText.className = "lyric-slot-status fallback";
+                statusText.innerHTML = `🔵 <span>延续: ${effective.video_name}</span>`;
             }
+            lyricItem?.classList.remove('filled');
+        } else {
+            if (statusText) {
+                statusText.className = "lyric-slot-status";
+                statusText.innerHTML = `<span class="dot-indicator"></span> <span>未匹配素材</span>`;
+            }
+            lyricItem?.classList.remove('filled');
         }
     }
-    
-    // Auto-update JSON Editor configuration text when timeline refreshed
+
     updateJsonEditorForActiveSlot();
-    
-    // Auto-draw dialogue audio tracks visualizer
     drawDialogueWaveform();
 }
 
@@ -916,7 +870,7 @@ function drawWaveform() {
     const ctx = canvas.getContext('2d');
     
     // Fit canvas width to container size
-    const container = canvas.parentElement;
+    const container = document.querySelector('.timeline-scroll-container');
     // We scale width proportional to song duration to enable horizontal scrolling
     // Say 15 pixels per second of audio
     const pixelsPerSecond = 20;
@@ -926,11 +880,8 @@ function drawWaveform() {
     
     // Adjust ruler and tracks width
     document.getElementById('timeline-ruler').style.width = `${totalWidth}px`;
+    document.getElementById('timeline-track-stack').style.width = `${totalWidth}px`;
     document.getElementById('lyric-track-items').style.width = `${totalWidth}px`;
-    document.getElementById('video-track-items').style.width = `${totalWidth}px`;
-    if (document.getElementById('dialogue-track-items')) {
-        document.getElementById('dialogue-track-items').style.width = `${totalWidth}px`;
-    }
     
     const w = canvas.width;
     const h = canvas.height;
@@ -998,87 +949,55 @@ function drawWaveform() {
 // Draw dialogue audio track segments (only where transcript is present)
 function drawDialogueWaveform() {
     if (!songData || !el.dialogueWaveformCanvas) return;
-    
+
     const canvas = el.dialogueWaveformCanvas;
     const ctx = canvas.getContext('2d');
-    
-    // Sync canvas width to song waveform width
     const totalWidth = el.waveformCanvas.width;
     canvas.width = totalWidth;
     canvas.style.width = `${totalWidth}px`;
-    
-    const w = canvas.width;
-    const h = canvas.height;
-    
-    ctx.clearRect(0, 0, w, h);
-    
-    // Draw grid matching the background song track
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const pixelsPerSecond = 20;
+    ctx.clearRect(0, 0, width, height);
+
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
     ctx.lineWidth = 1;
-    for (let x = 0; x < w; x += 50) {
+    for (let x = 0; x < width; x += 50) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
+        ctx.lineTo(x, height);
         ctx.stroke();
     }
-    
-    const pixelsPerSecond = 20;
-    
-    // Loop through slots and draw simulated waveforms for segments with transcript
+
     for (let i = 0; i < songData.lyrics.length; i++) {
         const slot = timelineSlots[i];
-        if (slot && slot.transcript) {
-            const lyric = songData.lyrics[i];
-            const startX = lyric.start * pixelsPerSecond;
-            const endX = lyric.end * pixelsPerSecond;
-            const width = endX - startX;
-            
-            if (width <= 0) continue;
-            
-            if (slot.keep_audio) {
-                // Bright Amber (Mixed)
-                ctx.fillStyle = 'rgba(255, 170, 0, 0.08)';
-                ctx.fillRect(startX, 0, width, h);
-                ctx.strokeStyle = 'rgba(255, 170, 0, 0.25)';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(startX, 0, width, h);
-                ctx.fillStyle = 'rgba(255, 170, 0, 0.7)';
-            } else {
-                // Muted Teal (Dialogue present but not mixed)
-                ctx.fillStyle = 'rgba(0, 242, 254, 0.02)';
-                ctx.fillRect(startX, 0, width, h);
-                ctx.strokeStyle = 'rgba(0, 242, 254, 0.15)';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(startX, 0, width, h);
-                ctx.fillStyle = 'rgba(0, 242, 254, 0.4)';
-            }
-            
-            // Draw simulated dialogue signal waveform (deterministic pseudorandom)
-            const barW = 2;
-            const gap = 1;
-            const step = barW + gap;
-            
-            for (let x = startX + 2; x < endX - 2; x += step) {
-                const val = (Math.sin(x * 0.35) * 0.45 + Math.cos(x * 0.12) * 0.25 + 0.3);
-                const barH = Math.max(2, val * (h - 8));
-                const y = (h - barH) / 2;
-                ctx.fillRect(x, y, barW, barH);
-            }
-            
-            // Draw text label with speaker name and dialogue snippet
-            const speaker = detectSpeaker(slot.video_name || '', slot.transcript || '');
-            const cleanName = slot.video_name ? slot.video_name.replace(/\.\w+$/, '') : 'vocal';
-            const displayName = cleanName.length > 15 ? cleanName.substring(0, 15) + '...' : cleanName;
-            
-            let label = `🎙️ [${speaker.toUpperCase()}] ${displayName}`;
-            if (slot.keep_audio) {
-                label = `🔊 ` + label;
-            }
-            
-            ctx.fillStyle = slot.keep_audio ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.45)';
-            ctx.font = 'bold 9px sans-serif';
-            ctx.fillText(label, startX + 6, 12);
+        if (!slot?.transcript) continue;
+
+        const lyric = songData.lyrics[i];
+        const startX = lyric.start * pixelsPerSecond;
+        const endX = lyric.end * pixelsPerSecond;
+        const segmentWidth = endX - startX;
+        if (segmentWidth <= 0) continue;
+
+        // Dialogue is always amber. Mixed dialogue is simply brighter.
+        const mixed = Boolean(slot.keep_audio);
+        ctx.fillStyle = mixed ? 'rgba(255, 190, 46, 0.22)' : 'rgba(255, 170, 0, 0.12)';
+        ctx.fillRect(startX, 0, segmentWidth, height);
+        ctx.strokeStyle = mixed ? 'rgba(255, 205, 72, 0.72)' : 'rgba(255, 170, 0, 0.42)';
+        ctx.strokeRect(startX, 0, segmentWidth, height);
+
+        ctx.fillStyle = mixed ? 'rgba(255, 214, 92, 0.95)' : 'rgba(255, 184, 30, 0.72)';
+        for (let x = startX + 2; x < endX - 2; x += 3) {
+            const value = Math.sin(x * 0.35) * 0.45 + Math.cos(x * 0.12) * 0.25 + 0.3;
+            const barHeight = Math.max(2, value * (height - 9));
+            ctx.fillRect(x, (height - barHeight) / 2, 2, barHeight);
         }
+
+        const speaker = detectSpeaker(slot.video_name || '', slot.transcript || '');
+        ctx.fillStyle = mixed ? '#fff4ce' : 'rgba(255, 225, 155, 0.82)';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText(`${mixed ? '🔊' : '🎙️'} [${speaker.toUpperCase()}]`, startX + 6, 13);
     }
 }
 
@@ -1289,50 +1208,30 @@ function renderLyricsList(lyrics) {
 
 function renderTimelineTracks(lyrics) {
     el.lyricTrackItems.innerHTML = '';
-    el.videoTrackItems.innerHTML = '';
-    if (el.dialogueTrackItems) el.dialogueTrackItems.innerHTML = '';
-    
     const pixelsPerSecond = 20;
-    
+
     lyrics.forEach((lyric, index) => {
-        const width = (lyric.end - lyric.start) * pixelsPerSecond;
-        const left = lyric.start * pixelsPerSecond;
-        
-        // Lyric track block
         const lyricBlock = document.createElement('div');
-        lyricBlock.className = 'track-block lyric-block';
-        lyricBlock.style.left = `${left}px`;
-        lyricBlock.style.width = `${width}px`;
+        lyricBlock.className = `track-block lyric-block${lyric.is_intro ? ' intro-block' : ''}`;
+        lyricBlock.style.left = `${lyric.start * pixelsPerSecond}px`;
+        lyricBlock.style.width = `${(lyric.end - lyric.start) * pixelsPerSecond}px`;
         lyricBlock.textContent = lyric.text;
-        lyricBlock.setAttribute('data-index', index);
-        lyricBlock.addEventListener('click', () => selectSlot(index));
+        lyricBlock.dataset.index = index;
+        lyricBlock.title = `${formatTime(lyric.start)} · ${lyric.text}`;
+        lyricBlock.addEventListener('click', () => selectTimelineLyric(index));
         el.lyricTrackItems.appendChild(lyricBlock);
-        
-        // Video track block (placeholder)
-        const videoBlock = document.createElement('div');
-        videoBlock.className = 'track-block video-block empty';
-        videoBlock.style.left = `${left}px`;
-        videoBlock.style.width = `${width}px`;
-        videoBlock.innerHTML = `<em>空槽位</em>`;
-        videoBlock.setAttribute('data-index', index);
-        videoBlock.id = `video-track-block-${index}`;
-        videoBlock.addEventListener('click', () => selectSlot(index));
-        el.videoTrackItems.appendChild(videoBlock);
-        
-        // Dialogue/transcript track block
-        if (el.dialogueTrackItems) {
-            const dialogueBlock = document.createElement('div');
-            dialogueBlock.className = 'track-block dialogue-block empty';
-            dialogueBlock.style.left = `${left}px`;
-            dialogueBlock.style.width = `${width}px`;
-            dialogueBlock.innerHTML = `<em>无台词</em>`;
-            dialogueBlock.setAttribute('data-index', index);
-            dialogueBlock.id = `dialogue-track-block-${index}`;
-            dialogueBlock.addEventListener('click', () => selectSlot(index));
-            el.dialogueTrackItems.appendChild(dialogueBlock);
-        }
     });
+
     refreshTimelineBlocks();
+}
+
+function selectTimelineLyric(index) {
+    const lyric = songData?.lyrics[index];
+    if (!lyric) return;
+
+    selectSlot(index);
+    seekToLyric(audioEl, lyric);
+    updatePlayheadPosition();
 }
 
 // Select a Slot (lyric segment)
@@ -1341,8 +1240,6 @@ function selectSlot(index) {
         // Deselect previous
         document.querySelector(`.lyric-item[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
         document.querySelector(`.lyric-block[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
-        document.querySelector(`.video-block[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
-        document.querySelector(`.dialogue-block[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
     }
     
     activeSlotIndex = index;
@@ -1350,8 +1247,6 @@ function selectSlot(index) {
     // Mark active in UI
     document.querySelector(`.lyric-item[data-index="${index}"]`)?.classList.add('active');
     document.querySelector(`.lyric-block[data-index="${index}"]`)?.classList.add('active');
-    document.querySelector(`.video-block[data-index="${index}"]`)?.classList.add('active');
-    document.querySelector(`.dialogue-block[data-index="${index}"]`)?.classList.add('active');
     
     // Scroll active lyric item into view
     document.querySelector(`.lyric-item[data-index="${index}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -2727,6 +2622,7 @@ function switchActivePlayer(targetSrc, targetTime) {
     // Switch active player references if needed
     if (nextActive !== activePlayer) {
         activePlayer.pause();
+        activePlayer.muted = true;
         activePlayer.style.display = 'none';
         activePlayer.dataset.isStarting = "false"; // Reset starting status on old player
         
@@ -2739,8 +2635,9 @@ function switchActivePlayer(targetSrc, targetTime) {
         preloadPlayer.style.display = 'none';
     }
     
-    activePlayer.muted = true;
-    preloadPlayer.muted = true;
+    // Do not mute the active player here: this function runs every 50ms while
+    // previewing, and toggling mute would chop dialogue audio into tiny pieces.
+    mutePreloadPlayer(preloadPlayer, activePlayer);
 }
 
 function pauseBothPlayers() {

@@ -6,7 +6,7 @@
     <title>AI MV Script & HyperFrames Studio</title>
     <!-- Google Fonts: Inter & JetBrains Mono -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/style.css?v=26">
+    <link rel="stylesheet" href="/assets/style.css?v=28">
 </head>
 <body>
     <div class="glow-bg"></div>
@@ -169,24 +169,22 @@
                         <div class="timeline-ruler" id="timeline-ruler">
                             <!-- Timestamps will be drawn dynamically -->
                         </div>
-                        <div class="timeline-visualizer-container">
-                            <canvas id="waveform-canvas" height="80"></canvas>
-                            <canvas id="dialogue-waveform-canvas" height="35" style="width: 100%; display: block; border-top: 1px solid rgba(255, 255, 255, 0.05); background: rgba(0, 0, 0, 0.2);"></canvas>
+                        <div class="timeline-track-stack" id="timeline-track-stack">
+                            <div class="timeline-track-row music-track-row">
+                                <div class="track-row-label">🎵 音乐</div>
+                                <canvas id="waveform-canvas" height="58"></canvas>
+                            </div>
+                            <div class="timeline-track-row dialogue-track-row">
+                                <div class="track-row-label">🎙️ 台词</div>
+                                <canvas id="dialogue-waveform-canvas" height="42"></canvas>
+                            </div>
+                            <div class="timeline-track-row lyric-track-row">
+                                <div class="track-row-label">✍️ 歌词</div>
+                                <div class="track-items" id="lyric-track-items">
+                                    <!-- Clickable lyric blocks are rendered here -->
+                                </div>
+                            </div>
                             <div class="playhead" id="playhead"></div>
-                        </div>
-                        <div class="timeline-tracks" id="timeline-tracks">
-                            <div class="track-label">歌词段落</div>
-                            <div class="track-items" id="lyric-track-items">
-                                <!-- Lyric segments blocks will go here -->
-                            </div>
-                            <div class="track-label">视频素材</div>
-                            <div class="track-items" id="video-track-items">
-                                <!-- Selected video blocks will go here -->
-                            </div>
-                            <div class="track-label">台词对白</div>
-                            <div class="track-items" id="dialogue-track-items">
-                                <!-- Dialogue segments blocks will go here -->
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -516,6 +514,6 @@
         </div>
     </div>
 
-    <script type="module" src="/assets/app.js?v=26"></script>
+    <script type="module" src="/assets/app.js?v=29"></script>
 </body>
 </html>
