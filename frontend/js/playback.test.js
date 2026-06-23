@@ -7,7 +7,9 @@ import {
     findActiveLyricIndex,
     formatTime,
     mutePreloadPlayer,
+    resolveSpeaker,
     seekToLyric,
+    shouldShowLyricSubtitle,
     shouldResync,
 } from './playback.js';
 
@@ -40,9 +42,20 @@ test('speaker detection keeps the existing character mapping', () => {
     assert.equal(detectSpeaker('scene', 'ordinary dialogue'), 'unknown');
 });
 
+test('manual speaker override takes precedence over automatic detection', () => {
+    assert.equal(resolveSpeaker('scene', '佐佐木回答'), 'sasaki');
+    assert.equal(resolveSpeaker('scene', '佐佐木回答', 'unknown', true), 'unknown');
+    assert.equal(resolveSpeaker('scene', '佐佐木回答', 'yamada', true), 'yamada');
+});
+
 test('clicking a lyric block seeks the music clock to that lyric', () => {
     const audioPlayer = { currentTime: 0 };
 
     assert.equal(seekToLyric(audioPlayer, { start: 12.5 }), true);
     assert.equal(audioPlayer.currentTime, 12.5);
+});
+
+test('intro timing slots do not render as lyric subtitles', () => {
+    assert.equal(shouldShowLyricSubtitle({ text: 'Intro', is_intro: true }), false);
+    assert.equal(shouldShowLyricSubtitle({ text: 'Actual lyric' }), true);
 });

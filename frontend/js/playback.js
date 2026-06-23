@@ -3,8 +3,12 @@ export function findActiveLyricIndex(lyrics, currentTime) {
     return lyrics.findIndex(lyric => currentTime >= lyric.start && currentTime < lyric.end);
 }
 
+export function shouldShowLyricSubtitle(lyric) {
+    return Boolean(lyric && !lyric.is_intro);
+}
+
 export function calculateClipTime(slot, lyric, currentTime) {
-    return slot.clip_start + (currentTime - lyric.start);
+    return slot.clip_start + (currentTime - lyric.start - (slot.offset_start || 0));
 }
 
 export function shouldResync(actualTime, expectedTime, threshold = 0.45) {
@@ -38,4 +42,17 @@ export function detectSpeaker(summary, transcript) {
     if (normalizedSummary.includes('sasaki') || normalizedSummary.includes('佐佐木') || normalizedTranscript.includes('佐佐木')) return 'sasaki';
     if (normalizedSummary.includes('yamada') || normalizedSummary.includes('山田') || normalizedTranscript.includes('山田')) return 'yamada';
     return 'unknown';
+}
+
+export function normalizeSpeaker(speaker) {
+    const normalized = speaker ? String(speaker).toLowerCase() : 'unknown';
+    if (['tayama', 'sasaki', 'yamada', 'unknown'].includes(normalized)) return normalized;
+    return 'unknown';
+}
+
+export function resolveSpeaker(summary, transcript, speaker = 'unknown', speakerManual = false) {
+    const normalized = normalizeSpeaker(speaker);
+    if (speakerManual) return normalized;
+    if (normalized !== 'unknown') return normalized;
+    return detectSpeaker(summary, transcript);
 }

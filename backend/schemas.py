@@ -41,6 +41,20 @@ class TimelineSlot(BaseModel):
     keep_audio: Optional[bool] = False
     transcript: Optional[str] = ""
     speaker: Optional[str] = "unknown"
+    speaker_manual: Optional[bool] = False
+
+
+class DialogueClip(BaseModel):
+    start_time: float
+    end_time: float
+    video_path: str
+    clip_start: float
+    clip_duration: float
+    transcript: Optional[str] = ""
+    speaker: Optional[str] = "unknown"
+    speaker_manual: Optional[bool] = False
+    source_slot_index: Optional[int] = None
+    source_segment_index: Optional[int] = None
 
 
 class TrimRequest(BaseModel):

@@ -1,5 +1,5 @@
 import { apiFetch } from './js/api.js';
-import { calculateClipTime, detectSpeaker, findActiveLyricIndex, formatTime, mutePreloadPlayer, seekToLyric, shouldResync } from './js/playback.js';
+import { calculateClipTime, findActiveLyricIndex, formatTime, mutePreloadPlayer, normalizeSpeaker, resolveSpeaker, seekToLyric, shouldResync, shouldShowLyricSubtitle } from './js/playback.js';
 import { resolveEffectiveSlot } from './js/timeline-model.js';
 import { getEditorElements } from './js/dom.js';
 import { highlightPlayingTranscript, renderBrowserSegments, renderBrowserTranscripts } from './js/video-browser-renderers.js';
@@ -24,6 +24,7 @@ function browserLog(msg) {
 // State variables
 let songData = null;
 let activeSlotIndex = null;
+let activeSegmentIndex = 0;
 let timelineSlots = []; // Array of { video_path, video_name, proxy_url, clip_start, clip_duration, frame_url }
 let audioEl = new Audio();
 let isPlaying = false;
@@ -98,9 +99,60 @@ function updateModelStatus(ok, text) {
     txt.textContent = text;
 }
 
+function clampMediaVolume(value) {
+    return Math.max(0, Math.min(1, value || 0));
+}
+
+function updateVolumeLabels() {
+    const shownMusic = el.musicVolumeSlider ? parseFloat(el.musicVolumeSlider.value || 0) : (isMuted ? 0 : musicVolume);
+    const shownDialogue = el.dialogueVolumeSlider ? parseFloat(el.dialogueVolumeSlider.value || 0) : (isMuted ? 0 : dialogueVolume);
+    if (el.musicVolumeValue) el.musicVolumeValue.textContent = shownMusic.toFixed(2);
+    if (el.dialogueVolumeValue) el.dialogueVolumeValue.textContent = shownDialogue.toFixed(2);
+}
+
+const SPEAKER_META = {
+    auto: { label: '自动识别', color: '#ffffff' },
+    unknown: { label: '未知', color: '#ffffff' },
+    tayama: { label: '田山', color: '#00f2fe' },
+    sasaki: { label: '佐佐木', color: '#ffcc00' },
+    yamada: { label: '山田', color: '#ff80bf' },
+};
+
+function getSpeakerMeta(speaker) {
+    return SPEAKER_META[normalizeSpeaker(speaker)] || SPEAKER_META.unknown;
+}
+
+function resolveSlotSpeaker(slot) {
+    if (!slot) return 'unknown';
+    return resolveSpeaker(
+        slot.video_name || '',
+        slot.transcript || '',
+        slot.speaker || 'unknown',
+        Boolean(slot.speaker_manual)
+    );
+}
+
+function getSlotSpeakerSelectValue(slot) {
+    if (!slot) return 'auto';
+    return slot.speaker_manual ? normalizeSpeaker(slot.speaker || 'unknown') : 'auto';
+}
+
+function getSlotSpeakerDisplay(slot) {
+    if (!slot) return '未匹配素材';
+    const resolved = resolveSlotSpeaker(slot);
+    const meta = getSpeakerMeta(resolved);
+    return slot.speaker_manual ? `手动: ${meta.label}` : `自动: ${meta.label}`;
+}
+
+function applyDialogueSpeakerColor(element, speaker) {
+    if (!element) return;
+    element.style.color = getSpeakerMeta(speaker).color;
+}
+
 function updateVolume() {
     const targetMusicVolume = isMuted ? 0 : musicVolume;
     const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
+    updateVolumeLabels();
     
     // Dynamically sync active preview player's volume and muted state based on keep_audio status
     if (activePlayer) {
@@ -109,7 +161,7 @@ function updateVolume() {
             const curr = audioEl.currentTime;
             if (songData) {
                 const activeIndex = findActiveLyricIndex(songData.lyrics, curr);
-                const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex) : null;
+                const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex, curr) : null;
                 if (effective && effective.keep_audio) {
                     shouldKeepAudio = true;
                 }
@@ -126,7 +178,7 @@ function updateVolume() {
         if (shouldKeepAudio && !isMuted) {
             audioEl.volume = targetMusicVolume;
             activePlayer.muted = false;
-            activePlayer.volume = targetDialogueVolume;
+            activePlayer.volume = clampMediaVolume(targetDialogueVolume);
         } else {
             audioEl.volume = targetMusicVolume;
             activePlayer.muted = true;
@@ -154,10 +206,132 @@ function updateVolume() {
             el.volumeMuteBtn.textContent = "🔊";
         }
     }
+    updateVolumeLabels();
 }
 
-function getEffectiveSlot(index) {
-    return resolveEffectiveSlot(timelineSlots, songData?.lyrics, index);
+function getLyricDuration(index) {
+    if (!songData?.lyrics?.[index]) return 0;
+    return songData.lyrics[index].end - songData.lyrics[index].start;
+}
+
+function isSegmentedSlot(slot) {
+    return Boolean(slot && Array.isArray(slot.segments));
+}
+
+function makeSegmentFromSlot(slot, offsetStart = 0, offsetEnd = null) {
+    const duration = offsetEnd !== null ? offsetEnd - offsetStart : (slot.clip_duration || 0);
+    const segment = { ...slot };
+    delete segment.segments;
+    segment.offset_start = Number.isFinite(offsetStart) ? offsetStart : 0;
+    segment.offset_end = Number.isFinite(offsetEnd) ? offsetEnd : segment.offset_start + duration;
+    segment.clip_duration = Math.max(0, segment.offset_end - segment.offset_start);
+    return segment;
+}
+
+function syncSlotFromSegment(slot, segment) {
+    if (!slot || !segment) return slot;
+    Object.assign(slot, {
+        video_path: segment.video_path,
+        video_name: segment.video_name,
+        proxy_url: segment.proxy_url,
+        clip_start: segment.clip_start,
+        clip_duration: segment.clip_duration,
+        video_duration: segment.video_duration,
+        transcript: segment.transcript || "",
+        keep_audio: segment.keep_audio || false,
+        speaker: segment.speaker || "unknown",
+        speaker_manual: Boolean(segment.speaker_manual),
+        frame_url: segment.frame_url || ""
+    });
+    return slot;
+}
+
+function normalizeSlotForSegments(index) {
+    const slot = timelineSlots[index];
+    if (!slot) return null;
+    const duration = getLyricDuration(index);
+    if (!Array.isArray(slot.segments)) {
+        slot.segments = [makeSegmentFromSlot(slot, 0, duration)];
+    }
+    slot.segments = slot.segments
+        .map((seg, segIndex) => ({
+            ...seg,
+            offset_start: Number.isFinite(parseFloat(seg.offset_start)) ? parseFloat(seg.offset_start) : 0,
+            offset_end: Number.isFinite(parseFloat(seg.offset_end)) ? parseFloat(seg.offset_end) : duration,
+            clip_duration: Math.max(0, (Number.isFinite(parseFloat(seg.offset_end)) ? parseFloat(seg.offset_end) : duration) - (Number.isFinite(parseFloat(seg.offset_start)) ? parseFloat(seg.offset_start) : 0)),
+            segment_index: segIndex,
+        }))
+        .sort((a, b) => a.offset_start - b.offset_start);
+    slot.segments.forEach((seg, segIndex) => {
+        seg.segment_index = segIndex;
+        seg.clip_duration = Math.max(0, seg.offset_end - seg.offset_start);
+    });
+    activeSegmentIndex = Math.max(0, Math.min(activeSegmentIndex, slot.segments.length - 1));
+    syncSlotFromSegment(slot, slot.segments[activeSegmentIndex] || slot.segments[0]);
+    return slot;
+}
+
+function getActiveSegment(index) {
+    const slot = normalizeSlotForSegments(index);
+    if (!slot) return null;
+    return slot.segments[activeSegmentIndex] || slot.segments[0] || null;
+}
+
+function getSegmentForTime(index, currentTime) {
+    const slot = normalizeSlotForSegments(index);
+    if (!slot || !songData?.lyrics?.[index]) return null;
+    const localTime = currentTime - songData.lyrics[index].start;
+    return slot.segments.find(seg => localTime >= seg.offset_start && localTime < seg.offset_end) || slot.segments[slot.segments.length - 1];
+}
+
+function getEffectiveSlot(index, currentTime = null) {
+    if (timelineSlots[index]) {
+        const segment = currentTime !== null ? getSegmentForTime(index, currentTime) : getActiveSegment(index);
+        return segment ? { ...segment, isFallback: false, segment_index: activeSegmentIndex } : null;
+    }
+    return resolveEffectiveSlot(timelineSlots, songData?.lyrics, index, currentTime);
+}
+
+function buildSlotsPayload() {
+    const slotsPayload = [];
+    if (!songData) return slotsPayload;
+    for (let i = 0; i < songData.lyrics.length; i++) {
+        const lyric = songData.lyrics[i];
+        const slot = timelineSlots[i];
+        if (slot) {
+            normalizeSlotForSegments(i);
+            slot.segments.forEach(seg => {
+                if (!seg.video_path) return;
+                slotsPayload.push({
+                    start_time: lyric.start + seg.offset_start,
+                    end_time: lyric.start + seg.offset_end,
+                    video_path: seg.video_path,
+                    clip_start: seg.clip_start,
+                    clip_duration: seg.offset_end - seg.offset_start,
+                    keep_audio: seg.keep_audio || false,
+                    transcript: seg.transcript || "",
+                    speaker: resolveSlotSpeaker(seg),
+                    speaker_manual: Boolean(seg.speaker_manual)
+                });
+            });
+        } else {
+            const effective = getEffectiveSlot(i);
+            if (effective) {
+                slotsPayload.push({
+                    start_time: lyric.start,
+                    end_time: lyric.end,
+                    video_path: effective.video_path,
+                    clip_start: effective.clip_start,
+                    clip_duration: lyric.end - lyric.start,
+                    keep_audio: effective.keep_audio || false,
+                    transcript: effective.transcript || "",
+                    speaker: resolveSlotSpeaker(effective),
+                    speaker_manual: Boolean(effective.speaker_manual)
+                });
+            }
+        }
+    }
+    return slotsPayload.sort((a, b) => a.start_time - b.start_time);
 }
 
 function hasVideoOverlap(cand, index) {
@@ -381,6 +555,27 @@ function setupEventListeners() {
     
     // Unlink and bulk match handlers
     el.clearSlotBtn.addEventListener('click', clearActiveSlot);
+    if (el.addSegmentBtn) el.addSegmentBtn.addEventListener('click', addSegmentToActiveSlot);
+    if (el.slotSpeakerSelect) {
+        el.slotSpeakerSelect.addEventListener('change', () => updateSpeakerOverride(el.slotSpeakerSelect.value));
+    }
+    if (el.slotSegmentsList) {
+        el.slotSegmentsList.addEventListener('click', (event) => {
+            const deleteBtn = event.target.closest('.delete-segment-btn');
+            if (deleteBtn) {
+                event.stopPropagation();
+                deleteSegment(parseInt(deleteBtn.dataset.segmentIndex, 10));
+                return;
+            }
+            const row = event.target.closest('.slot-segment-row');
+            if (row) selectSegment(parseInt(row.dataset.segmentIndex, 10));
+        });
+        el.slotSegmentsList.addEventListener('change', (event) => {
+            const input = event.target.closest('.segment-offset-input');
+            if (!input) return;
+            updateSegmentOffset(parseInt(input.dataset.segmentIndex, 10), input.dataset.field, input.value);
+        });
+    }
     el.autoMatchAllBtn.addEventListener('click', autoMatchAllSlots);
 
     // Video Browser Modal event handlers
@@ -450,7 +645,7 @@ function setupEventListeners() {
     if (el.trimmerInput) {
         el.trimmerInput.addEventListener('input', () => {
             if (activeSlotIndex === null) return;
-            const slot = timelineSlots[activeSlotIndex];
+            const slot = getActiveSegment(activeSlotIndex);
             if (!slot) return;
             
             let val = parseFloat(el.trimmerInput.value);
@@ -460,6 +655,7 @@ function setupEventListeners() {
             val = Math.max(0, Math.min(maxStart, val));
             
             slot.clip_start = val;
+            syncSlotFromSegment(timelineSlots[activeSlotIndex], slot);
             el.trimmerRange.value = val;
             el.trimmerValue.textContent = `${val.toFixed(1)}s`;
             
@@ -994,7 +1190,7 @@ function drawDialogueWaveform() {
             ctx.fillRect(x, (height - barHeight) / 2, 2, barHeight);
         }
 
-        const speaker = detectSpeaker(slot.video_name || '', slot.transcript || '');
+        const speaker = resolveSlotSpeaker(slot);
         ctx.fillStyle = mixed ? '#fff4ce' : 'rgba(255, 225, 155, 0.82)';
         ctx.font = 'bold 9px sans-serif';
         ctx.fillText(`${mixed ? '🔊' : '🎙️'} [${speaker.toUpperCase()}]`, startX + 6, 13);
@@ -1062,12 +1258,12 @@ function updateGlobalPreview(curr) {
     if (!songData) return;
     
     const activeIndex = findActiveLyricIndex(songData.lyrics, curr);
-    const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex) : null;
+    const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex, curr) : null;
     
     // 1. Update Monitor Lyric Subtitle Overlay (Bottom)
     const monitorLyric = document.getElementById('monitor-lyric-overlay');
     if (monitorLyric) {
-        if (activeIndex !== -1 && songData.lyrics[activeIndex]) {
+        if (activeIndex !== -1 && shouldShowLyricSubtitle(songData.lyrics[activeIndex])) {
             monitorLyric.textContent = songData.lyrics[activeIndex].text;
             monitorLyric.style.display = 'block';
         } else {
@@ -1093,7 +1289,7 @@ function updateGlobalPreview(curr) {
         const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
         if (effective.keep_audio && !isMuted) {
             activePlayer.muted = false;
-            activePlayer.volume = targetDialogueVolume;
+            activePlayer.volume = clampMediaVolume(targetDialogueVolume);
             audioEl.volume = targetMusicVolume;
         } else {
             activePlayer.muted = true;
@@ -1107,17 +1303,7 @@ function updateGlobalPreview(curr) {
                 monitorDialogue.textContent = effective.transcript;
                 monitorDialogue.style.display = 'block';
                 
-                // Color based on speaker
-                const speaker = detectSpeaker(effective.video_name || '', effective.transcript || '');
-                if (speaker === 'tayama') {
-                    monitorDialogue.style.color = '#00f2fe'; // Tayama Cyan
-                } else if (speaker === 'sasaki') {
-                    monitorDialogue.style.color = '#ffcc00'; // Sasaki Yellow
-                } else if (speaker === 'yamada') {
-                    monitorDialogue.style.color = '#ff80bf'; // Yamada Pink
-                } else {
-                    monitorDialogue.style.color = '#ffffff'; // White
-                }
+                applyDialogueSpeakerColor(monitorDialogue, resolveSlotSpeaker(effective));
             } else {
                 monitorDialogue.style.display = 'none';
             }
@@ -1234,6 +1420,157 @@ function selectTimelineLyric(index) {
     updatePlayheadPosition();
 }
 
+function renderSegmentControls() {
+    if (!el.slotSegmentsPanel || !el.slotSegmentsList) return;
+    if (activeSlotIndex === null || !songData) {
+        el.slotSegmentsPanel.style.display = 'none';
+        el.slotSegmentsList.innerHTML = '';
+        return;
+    }
+    el.slotSegmentsPanel.style.display = 'block';
+    const slot = normalizeSlotForSegments(activeSlotIndex);
+    if (!slot) {
+        el.slotSegmentsList.innerHTML = '<div style="font-size:11px; color:var(--text-secondary);">Match a clip first, then add child shots.</div>';
+        return;
+    }
+    const duration = getLyricDuration(activeSlotIndex);
+    el.slotSegmentsList.innerHTML = slot.segments.map((seg, idx) => {
+        const active = idx === activeSegmentIndex;
+        const name = seg.video_name || (seg.video_path ? seg.video_path.split('/').pop() : 'Unmatched');
+        const speaker = resolveSlotSpeaker(seg);
+        const speakerMeta = getSpeakerMeta(speaker);
+        const speakerLabel = getSlotSpeakerDisplay(seg);
+        return `
+            <div class="slot-segment-row" data-segment-index="${idx}" style="padding:6px; border-radius:7px; border:1px solid ${active ? 'rgba(0,242,254,.55)' : 'rgba(255,255,255,.08)'}; background:${active ? 'rgba(0,242,254,.10)' : 'rgba(255,255,255,.03)'}; cursor:pointer;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:5px;">
+                    <strong style="font-size:11px; color:${active ? '#00f2fe' : '#fff'};">#${idx + 1} ${name}</strong>
+                    <button class="delete-segment-btn" data-segment-index="${idx}" style="font-size:10px; padding:2px 6px; border:1px solid rgba(255,100,100,.25); color:#ff6b6b; background:transparent; border-radius:5px; cursor:pointer;" ${slot.segments.length <= 1 ? 'disabled' : ''}>Delete</button>
+                </div>
+                <div style="font-size:10px; color:${speakerMeta.color}; margin-bottom:5px;">${speakerLabel}</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:10px; color:var(--text-secondary);">
+                    <label>Start <input class="segment-offset-input" data-field="offset_start" data-segment-index="${idx}" type="number" min="0" max="${duration.toFixed(2)}" step="0.1" value="${seg.offset_start.toFixed(1)}" style="width:100%; margin-top:2px; background:rgba(0,0,0,.25); border:1px solid var(--border-color); color:#fff; border-radius:4px; padding:3px;"></label>
+                    <label>End <input class="segment-offset-input" data-field="offset_end" data-segment-index="${idx}" type="number" min="0" max="${duration.toFixed(2)}" step="0.1" value="${seg.offset_end.toFixed(1)}" style="width:100%; margin-top:2px; background:rgba(0,0,0,.25); border:1px solid var(--border-color); color:#fff; border-radius:4px; padding:3px;"></label>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function syncSpeakerOverrideControls() {
+    if (!el.slotSpeakerSelect || !el.slotSpeakerStatus) return;
+    const segment = activeSlotIndex !== null ? getActiveSegment(activeSlotIndex) : null;
+    if (!segment) {
+        el.slotSpeakerSelect.value = 'auto';
+        el.slotSpeakerSelect.setAttribute('disabled', 'true');
+        el.slotSpeakerStatus.textContent = '先匹配素材';
+        el.slotSpeakerStatus.style.color = 'var(--text-muted)';
+        return;
+    }
+
+    const speaker = resolveSlotSpeaker(segment);
+    el.slotSpeakerSelect.removeAttribute('disabled');
+    el.slotSpeakerSelect.value = getSlotSpeakerSelectValue(segment);
+    el.slotSpeakerStatus.textContent = getSlotSpeakerDisplay(segment);
+    el.slotSpeakerStatus.style.color = getSpeakerMeta(speaker).color;
+}
+
+function updateSpeakerOverride(value) {
+    if (activeSlotIndex === null) return;
+    const slot = normalizeSlotForSegments(activeSlotIndex);
+    if (!slot) return;
+    const segment = slot.segments[activeSegmentIndex] || slot.segments[0];
+    if (!segment) return;
+
+    if (value === 'auto') {
+        segment.speaker = 'unknown';
+        segment.speaker_manual = false;
+    } else {
+        segment.speaker = normalizeSpeaker(value);
+        segment.speaker_manual = true;
+    }
+
+    syncSlotFromSegment(slot, segment);
+    syncSpeakerOverrideControls();
+    renderSegmentControls();
+    updateJsonEditorForActiveSlot();
+    refreshTimelineBlocks();
+    renderScriptOutline();
+    updateGlobalPreview(audioEl.currentTime);
+}
+
+function selectSegment(index) {
+    const slot = normalizeSlotForSegments(activeSlotIndex);
+    if (!slot) return;
+    activeSegmentIndex = Math.max(0, Math.min(index, slot.segments.length - 1));
+    syncSlotFromSegment(slot, slot.segments[activeSegmentIndex]);
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
+    updatePreviewPlayerForSlot(activeSlotIndex);
+    updateJsonEditorForActiveSlot();
+}
+
+function addSegmentToActiveSlot() {
+    if (activeSlotIndex === null || !songData) return;
+    const slot = normalizeSlotForSegments(activeSlotIndex);
+    if (!slot) {
+        alert('请先为当前槽位匹配素材，再添加分段。');
+        return;
+    }
+    const current = slot.segments[activeSegmentIndex] || slot.segments[slot.segments.length - 1];
+    const minLen = 0.2;
+    if ((current.offset_end - current.offset_start) < minLen * 2) {
+        alert('当前分段太短，无法继续拆分。');
+        return;
+    }
+    const split = parseFloat(((current.offset_start + current.offset_end) / 2).toFixed(2));
+    const newSegment = { ...current, offset_start: split, offset_end: current.offset_end, clip_start: current.clip_start + (split - current.offset_start) };
+    current.offset_end = split;
+    current.clip_duration = current.offset_end - current.offset_start;
+    newSegment.clip_duration = newSegment.offset_end - newSegment.offset_start;
+    slot.segments.splice(activeSegmentIndex + 1, 0, newSegment);
+    activeSegmentIndex += 1;
+    normalizeSlotForSegments(activeSlotIndex);
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
+    updatePreviewPlayerForSlot(activeSlotIndex);
+    updateJsonEditorForActiveSlot();
+    refreshTimelineBlocks();
+}
+
+function deleteSegment(index) {
+    const slot = normalizeSlotForSegments(activeSlotIndex);
+    if (!slot || slot.segments.length <= 1) return;
+    slot.segments.splice(index, 1);
+    activeSegmentIndex = Math.max(0, Math.min(activeSegmentIndex, slot.segments.length - 1));
+    normalizeSlotForSegments(activeSlotIndex);
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
+    updatePreviewPlayerForSlot(activeSlotIndex);
+    updateJsonEditorForActiveSlot();
+    refreshTimelineBlocks();
+    updateFooterStats();
+}
+
+function updateSegmentOffset(index, field, value) {
+    const slot = normalizeSlotForSegments(activeSlotIndex);
+    if (!slot || !slot.segments[index]) return;
+    const duration = getLyricDuration(activeSlotIndex);
+    const seg = slot.segments[index];
+    let val = parseFloat(value);
+    if (!Number.isFinite(val)) return;
+    val = Math.max(0, Math.min(duration, val));
+    if (field === 'offset_start') {
+        seg.offset_start = Math.min(val, seg.offset_end - 0.1);
+    } else {
+        seg.offset_end = Math.max(val, seg.offset_start + 0.1);
+    }
+    seg.clip_duration = seg.offset_end - seg.offset_start;
+    normalizeSlotForSegments(activeSlotIndex);
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
+    updatePreviewPlayerForSlot(activeSlotIndex);
+    updateJsonEditorForActiveSlot();
+}
+
 // Select a Slot (lyric segment)
 function selectSlot(index) {
     if (activeSlotIndex !== null) {
@@ -1243,6 +1580,10 @@ function selectSlot(index) {
     }
     
     activeSlotIndex = index;
+    activeSegmentIndex = 0;
+    normalizeSlotForSegments(index);
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
     
     // Mark active in UI
     document.querySelector(`.lyric-item[data-index="${index}"]`)?.classList.add('active');
@@ -1271,7 +1612,7 @@ function selectSlot(index) {
     }
     
     // Sync manual video and timestamp selection controls
-    const slot = timelineSlots[index];
+    const slot = getActiveSegment(index);
     if (slot) {
         if (el.manualVideoSelect) {
             el.manualVideoSelect.value = slot.video_path;
@@ -1322,7 +1663,7 @@ function updatePreviewPlayerForSlot(index) {
     if (isTrimmerPlaying) {
         stopTrimmerPlay();
     }
-    const slot = timelineSlots[index];
+    const slot = getActiveSegment(index);
     
     if (slot) {
         // Show video player
@@ -1350,7 +1691,7 @@ function updatePreviewPlayerForSlot(index) {
         const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
         if (slot.keep_audio && !isMuted) {
             activePlayer.muted = false;
-            activePlayer.volume = Math.min(1.0, targetDialogueVolume);
+            activePlayer.volume = clampMediaVolume(targetDialogueVolume);
         } else {
             activePlayer.muted = true;
         }
@@ -1391,11 +1732,12 @@ function updatePreviewPlayerForSlot(index) {
 // Trigger trimmer slide change
 function handleTrimmerChange() {
     if (activeSlotIndex === null) return;
-    const slot = timelineSlots[activeSlotIndex];
+    const slot = getActiveSegment(activeSlotIndex);
     if (!slot) return;
     
     const val = parseFloat(el.trimmerRange.value);
     slot.clip_start = val;
+    syncSlotFromSegment(timelineSlots[activeSlotIndex], slot);
     el.trimmerValue.textContent = `${val.toFixed(1)}s`;
     
     if (el.trimmerInput) {
@@ -1416,7 +1758,7 @@ function handleTrimmerChange() {
 
 function toggleTrimmerPlay() {
     if (activeSlotIndex === null) return;
-    const slot = timelineSlots[activeSlotIndex];
+    const slot = getActiveSegment(activeSlotIndex);
     if (!slot || !activePlayer) return;
 
     if (isTrimmerPlaying) {
@@ -1433,11 +1775,11 @@ function toggleTrimmerPlay() {
         
         // Setup volume and mute: ALWAYS unmute during trimmer preview so user can hear dialogue/action!
         activePlayer.muted = false;
-        activePlayer.volume = isMuted ? 0 : Math.min(1.0, dialogueVolume || 0.8);
+        activePlayer.volume = isMuted ? 0 : clampMediaVolume(dialogueVolume || 0.8);
         
         // Define dynamic timeupdate listener
         trimmerPlayTimeUpdateHandler = () => {
-            const currentSlot = timelineSlots[activeSlotIndex];
+            const currentSlot = getActiveSegment(activeSlotIndex);
             if (!currentSlot) {
                 stopTrimmerPlay();
                 return;
@@ -1692,7 +2034,9 @@ function assignCandidateToActiveSlot(cand) {
     if (activeSlotIndex === null || !songData) return;
     
     const lyric = songData.lyrics[activeSlotIndex];
-    const duration = lyric.end - lyric.start;
+    const existingSlot = normalizeSlotForSegments(activeSlotIndex);
+    const activeSeg = existingSlot ? getActiveSegment(activeSlotIndex) : null;
+    const duration = activeSeg ? (activeSeg.offset_end - activeSeg.offset_start) : (lyric.end - lyric.start);
     const fileName = cand.video_path.split('/').pop();
     
     // If the segment has dialogue/transcript, align clip start to the beginning of the segment/dialogue
@@ -1722,7 +2066,7 @@ function assignCandidateToActiveSlot(cand) {
         }
     }
     
-    timelineSlots[activeSlotIndex] = {
+    const assignedSegment = {
         video_path: cand.video_path,
         video_name: fileName,
         proxy_url: cand.proxy_url,
@@ -1730,11 +2074,23 @@ function assignCandidateToActiveSlot(cand) {
         clip_duration: duration,
         video_duration: cand.duration,
         transcript: transcript,
-        keep_audio: keep_audio
+        keep_audio: keep_audio,
+        speaker: "unknown",
+        speaker_manual: false,
+        offset_start: activeSeg ? activeSeg.offset_start : 0,
+        offset_end: activeSeg ? activeSeg.offset_end : (lyric.end - lyric.start)
     };
+    if (existingSlot) {
+        existingSlot.segments[activeSegmentIndex] = assignedSegment;
+        syncSlotFromSegment(existingSlot, assignedSegment);
+    } else {
+        timelineSlots[activeSlotIndex] = { ...assignedSegment, segments: [assignedSegment] };
+    }
     
     // Refresh all blocks on the timeline
     refreshTimelineBlocks();
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
     renderScriptOutline();
     
     // Update Monitor / Previews
@@ -1766,6 +2122,9 @@ function clearActiveSlot() {
     if (activeSlotIndex === null) return;
     
     timelineSlots[activeSlotIndex] = null;
+    activeSegmentIndex = 0;
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
     
     // Refresh timeline blocks and footer stats
     refreshTimelineBlocks();
@@ -1953,7 +2312,9 @@ async function autoMatchAllSlots() {
                         clip_duration: duration,
                         video_duration: selectedCand.duration,
                         transcript: transcript,
-                        keep_audio: keep_audio
+                        keep_audio: keep_audio,
+                        speaker: "unknown",
+                        speaker_manual: false
                     };
                     successCount++;
                     appendModalLog(`卡点 #${idx+1} 匹配成功: -> ${fileName} (从 ${clip_start.toFixed(1)}s)`);
@@ -2013,27 +2374,8 @@ async function renderVideo() {
     // Auto-save current configuration quietly before triggering render
     await saveSetup(true);
     
-    // Build JSON data payload
-    // Filter only filled slots or fill empty slots with a placeholder loop
-    const slotsPayload = [];
-    
-    for (let i = 0; i < songData.lyrics.length; i++) {
-        const lyric = songData.lyrics[i];
-        const effective = getEffectiveSlot(i);
-        
-        if (effective) {
-            slotsPayload.push({
-                start_time: lyric.start,
-                end_time: lyric.end,
-                video_path: effective.video_path,
-                clip_start: effective.clip_start,
-                clip_duration: lyric.end - lyric.start,
-                keep_audio: effective.keep_audio || false,
-                transcript: effective.transcript || "",
-                speaker: effective.speaker || "unknown"
-            });
-        }
-    }
+    // Build JSON data payload, expanding multi-shot lyric slots into render slots.
+    const slotsPayload = buildSlotsPayload();
     
     showModal("🎬 HyperFrames 渲染出片中", "组装剪辑脚本工程并导出视频帧...");
     appendModalLog(`开始构建 HyperFrames 剪辑项目...`);
@@ -2102,24 +2444,7 @@ async function exportPremiereXml() {
     if (timelineSlots.filter(s => s !== null).length === 0) return;
     if (!songData) return;
     
-    const slotsPayload = [];
-    for (let i = 0; i < songData.lyrics.length; i++) {
-        const lyric = songData.lyrics[i];
-        const effective = getEffectiveSlot(i);
-        
-        if (effective) {
-            slotsPayload.push({
-                start_time: lyric.start,
-                end_time: lyric.end,
-                video_path: effective.video_path,
-                clip_start: effective.clip_start,
-                clip_duration: lyric.end - lyric.start,
-                keep_audio: effective.keep_audio || false,
-                transcript: effective.transcript || "",
-                speaker: effective.speaker || "unknown"
-            });
-        }
-    }
+    const slotsPayload = buildSlotsPayload();
     
     showModal("💾 正在导出 Premiere XML", "生成兼容 Apple Final Cut Pro XML 规格的剪辑时间轨文件...");
     appendModalLog("正在构建时间轴剪辑决策点...");
@@ -2187,24 +2512,17 @@ function exportHyperFramesData() {
         }
     }
 
-    const slotsPayload = [];
-    for (let i = 0; i < songData.lyrics.length; i++) {
-        const lyric = songData.lyrics[i];
-        const effective = getEffectiveSlot(i);
-        
-        if (effective) {
-            slotsPayload.push({
-                startTime: lyric.start,
-                endTime: lyric.end,
-                videoPath: effective.video_path,
-                clipStart: effective.clip_start,
-                clipDuration: lyric.end - lyric.start,
-                keepAudio: effective.keep_audio || false,
-                transcript: effective.transcript || "",
-                speaker: effective.speaker || "unknown"
-            });
-        }
-    }
+    const slotsPayload = buildSlotsPayload().map(slot => ({
+        startTime: slot.start_time,
+        endTime: slot.end_time,
+        videoPath: slot.video_path,
+        clipStart: slot.clip_start,
+        clipDuration: slot.clip_duration,
+        keepAudio: slot.keep_audio || false,
+        transcript: slot.transcript || "",
+        speaker: slot.speaker || "unknown",
+        speakerManual: Boolean(slot.speaker_manual)
+    }));
     
     const renderData = {
         rangeStart: rangeStartVal,
@@ -2258,23 +2576,7 @@ async function saveSetup(isSilent = false) {
         appendModalLog(`收集时间轴卡点与音轨状态数据...`);
     }
     
-    const slotsPayload = [];
-    for (let i = 0; i < songData.lyrics.length; i++) {
-        const lyric = songData.lyrics[i];
-        const effective = getEffectiveSlot(i);
-        if (effective) {
-            slotsPayload.push({
-                start_time: lyric.start,
-                end_time: lyric.end,
-                video_path: effective.video_path,
-                clip_start: effective.clip_start,
-                clip_duration: lyric.end - lyric.start,
-                keep_audio: effective.keep_audio || false,
-                transcript: effective.transcript || "",
-                speaker: effective.speaker || "unknown"
-            });
-        }
-    }
+    const slotsPayload = buildSlotsPayload();
     
     let rangeStartVal = null;
     let rangeEndVal = null;
@@ -2460,26 +2762,45 @@ async function loadSetup(isSilent = false, setupName = "default") {
             if (el.rangeRenderEnd) el.rangeRenderEnd.value = data.range_end;
         }
         
-        // Match saved slots back to songData.lyrics
+        // Match saved render slots back to songData.lyrics. Multiple saved slots inside
+        // the same lyric become child shot segments.
         let restoredCount = 0;
         data.slots.forEach(slot => {
-            const idx = songData.lyrics.findIndex(l => Math.abs(l.start - slot.start_time) < 0.01);
+            const idx = songData.lyrics.findIndex(l => slot.start_time >= l.start - 0.01 && slot.start_time < l.end - 0.01);
             if (idx !== -1) {
+                const lyric = songData.lyrics[idx];
                 const matchedVideo = allIndexedVideos.find(v => v.original_path === slot.video_path);
-                timelineSlots[idx] = {
+                const segment = {
                     video_path: slot.video_path,
-                    video_name: slot.video_path.split(/[/\\]/).pop(),
+                    video_name: slot.video_path.split(/[\/\\]/).pop(),
                     proxy_url: matchedVideo ? matchedVideo.proxy_url : `/api/video_file?path=${encodeURIComponent(slot.video_path)}`,
                     clip_start: slot.clip_start,
-                    clip_duration: slot.clip_duration,
+                    clip_duration: slot.end_time - slot.start_time,
                     video_duration: matchedVideo ? matchedVideo.duration : slot.clip_duration + 5.0,
                     transcript: slot.transcript,
                     keep_audio: slot.keep_audio,
-                    frame_url: matchedVideo ? `/data/keyframes/${matchedVideo.original_path.split(/[/\\]/).pop().replace(/\.\w+$/, '')}_kf.jpg` : ''
+                    speaker: slot.speaker || "unknown",
+                    speaker_manual: Boolean(slot.speaker_manual),
+                    frame_url: matchedVideo ? `/data/keyframes/${matchedVideo.original_path.split(/[\/\\]/).pop().replace(/\.\w+$/, '')}_kf.jpg` : '',
+                    offset_start: Math.max(0, slot.start_time - lyric.start),
+                    offset_end: Math.min(lyric.end - lyric.start, slot.end_time - lyric.start)
                 };
+                if (!timelineSlots[idx]) {
+                    timelineSlots[idx] = { ...segment, segments: [segment] };
+                } else {
+                    normalizeSlotForSegments(idx);
+                    timelineSlots[idx].segments.push(segment);
+                }
                 restoredCount++;
             }
         });
+        timelineSlots.forEach((slot, idx) => {
+            if (slot) {
+                activeSegmentIndex = 0;
+                normalizeSlotForSegments(idx);
+            }
+        });
+        activeSegmentIndex = 0;
         
         // Update UI
         refreshTimelineBlocks();
@@ -2526,7 +2847,7 @@ function populateManualVideoSelect() {
 // Adjusts the clip trimmer start time by a step value (amount)
 function adjustTrimmerTime(amount) {
     if (activeSlotIndex === null) return;
-    const slot = timelineSlots[activeSlotIndex];
+    const slot = getActiveSegment(activeSlotIndex);
     if (!slot) return;
     
     let val = slot.clip_start + amount;
@@ -2534,6 +2855,7 @@ function adjustTrimmerTime(amount) {
     val = Math.max(0, Math.min(maxStart, val));
     
     slot.clip_start = val;
+    syncSlotFromSegment(timelineSlots[activeSlotIndex], slot);
     el.trimmerRange.value = val;
     el.trimmerValue.textContent = `${val.toFixed(1)}s`;
     
@@ -2565,7 +2887,9 @@ function manualAssignVideo() {
     const videoDuration = parseFloat(selectedOption.dataset.duration);
     
     const lyric = songData.lyrics[activeSlotIndex];
-    const duration = lyric.end - lyric.start;
+    const existingSlot = normalizeSlotForSegments(activeSlotIndex);
+    const activeSeg = existingSlot ? getActiveSegment(activeSlotIndex) : null;
+    const duration = activeSeg ? (activeSeg.offset_end - activeSeg.offset_start) : (lyric.end - lyric.start);
     
     let clipStart = parseFloat(el.manualClipStart.value);
     if (isNaN(clipStart) || clipStart < 0) {
@@ -2577,7 +2901,7 @@ function manualAssignVideo() {
     
     const fileName = videoPath.split('/').pop();
     
-    timelineSlots[activeSlotIndex] = {
+    const assignedSegment = {
         video_path: videoPath,
         video_name: fileName,
         proxy_url: proxyUrl,
@@ -2585,11 +2909,23 @@ function manualAssignVideo() {
         clip_duration: duration,
         video_duration: videoDuration,
         transcript: "",
-        keep_audio: false
+        keep_audio: false,
+        speaker: "unknown",
+        speaker_manual: false,
+        offset_start: activeSeg ? activeSeg.offset_start : 0,
+        offset_end: activeSeg ? activeSeg.offset_end : (lyric.end - lyric.start)
     };
+    if (existingSlot) {
+        existingSlot.segments[activeSegmentIndex] = assignedSegment;
+        syncSlotFromSegment(existingSlot, assignedSegment);
+    } else {
+        timelineSlots[activeSlotIndex] = { ...assignedSegment, segments: [assignedSegment] };
+    }
     
     // Refresh timeline blocks, stats, and monitor preview
     refreshTimelineBlocks();
+    renderSegmentControls();
+    syncSpeakerOverrideControls();
     updateFooterStats();
     updatePreviewPlayerForSlot(activeSlotIndex);
     
@@ -2811,6 +3147,8 @@ function updateJsonEditorForActiveSlot() {
             video_duration: 0.0,
             transcript: "",
             keep_audio: false,
+            speaker: "unknown",
+            speaker_manual: false,
             frame_url: ""
         };
         el.jsonEditorTextarea.value = JSON.stringify(template, null, 2);
@@ -2864,6 +3202,9 @@ function applyJsonEdit() {
         
         // Save back to timelineSlots
         timelineSlots[activeSlotIndex] = parsed;
+        normalizeSlotForSegments(activeSlotIndex);
+        renderSegmentControls();
+        syncSpeakerOverrideControls();
         
         // Refresh UI (will trigger refreshTimelineBlocks which triggers updateJsonEditorForActiveSlot)
         refreshTimelineBlocks();

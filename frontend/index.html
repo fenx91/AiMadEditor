@@ -158,8 +158,10 @@
                                 <span class="volume-icon" style="font-size: 14px; cursor: pointer; user-select: none;" id="volume-mute-btn" title="静音所有音轨">🔊</span>
                                 <span style="color: var(--text-secondary); white-space: nowrap;">🎵 音乐:</span>
                                 <input type="range" id="music-volume-slider" min="0" max="1" step="0.05" value="0.8" style="width: 60px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255, 255, 255, 0.15); border-radius: 2px; outline: none;" />
+                                <span id="music-volume-value" style="min-width: 34px; color: #00f2fe; font-family: var(--font-mono); text-align: right;">0.80</span>
                                 <span style="color: var(--text-secondary); white-space: nowrap; margin-left: 8px;">🎙️ 台词:</span>
-                                <input type="range" id="dialogue-volume-slider" min="0" max="1" step="0.05" value="0.8" style="width: 60px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255, 255, 255, 0.15); border-radius: 2px; outline: none;" />
+                                <input type="range" id="dialogue-volume-slider" min="0" max="2" step="0.05" value="0.8" style="width: 70px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255, 255, 255, 0.15); border-radius: 2px; outline: none;" />
+                                <span id="dialogue-volume-value" style="min-width: 34px; color: #ffcc00; font-family: var(--font-mono); text-align: right;">0.80</span>
                             </div>
                         </div>
                         <div class="bpm-info" id="bpm-display">BPM: --</div>
@@ -175,8 +177,12 @@
                                 <canvas id="waveform-canvas" height="58"></canvas>
                             </div>
                             <div class="timeline-track-row dialogue-track-row">
-                                <div class="track-row-label">🎙️ 台词</div>
-                                <canvas id="dialogue-waveform-canvas" height="42"></canvas>
+                                <div class="track-row-label">🎚️ 镜头原声</div>
+                                <canvas id="dialogue-waveform-canvas" height="34"></canvas>
+                            </div>
+                            <div class="timeline-track-row independent-dialogue-track-row">
+                                <div class="track-row-label">🎙️ 独立台词</div>
+                                <canvas id="independent-dialogue-canvas" height="42"></canvas>
                             </div>
                             <div class="timeline-track-row lyric-track-row">
                                 <div class="track-row-label">✍️ 歌词</div>
@@ -289,6 +295,51 @@
                             <div class="active-lyric-header">当前选中槽位</div>
                             <div class="active-lyric-text" id="active-lyric-text">请在左侧或时间轴上选择一个歌词槽位</div>
                             <div class="active-lyric-meta" id="active-lyric-meta">时间区间: --s</div>
+                            <div id="slot-speaker-controls" style="margin-top: 10px; display: grid; grid-template-columns: 86px 1fr; align-items: center; gap: 8px;">
+                                <label for="slot-speaker-select" style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em;">角色覆盖</label>
+                                <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                                    <select id="slot-speaker-select" disabled style="flex: 0 0 132px; min-width: 0; padding: 5px 7px; background: rgba(0,0,0,0.28); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; outline: none;">
+                                        <option value="auto">自动识别</option>
+                                        <option value="unknown">未知 / 白色</option>
+                                        <option value="tayama">田山 / 青色</option>
+                                        <option value="sasaki">佐佐木 / 黄色</option>
+                                        <option value="yamada">山田 / 粉色</option>
+                                    </select>
+                                    <span id="slot-speaker-status" style="font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">先匹配素材</span>
+                                </div>
+                            </div>
+                            <div id="slot-dialogue-controls" class="slot-dialogue-controls">
+                                <div class="slot-control-row">
+                                    <label for="slot-dialogue-mode">台词播放</label>
+                                    <select id="slot-dialogue-mode" disabled title="选择当前镜头台词的播放方式">
+                                        <option value="off">关闭</option>
+                                        <option value="linked">跟随镜头</option>
+                                        <option value="independent">独立音轨</option>
+                                    </select>
+                                    <span id="slot-dialogue-status">先匹配素材</span>
+                                </div>
+                                <div id="independent-dialogue-timing" class="independent-dialogue-timing" hidden>
+                                    <label>
+                                        <span>成片入点</span>
+                                        <input id="dialogue-timeline-start" type="number" min="0" step="0.1" value="0.0">
+                                    </label>
+                                    <label>
+                                        <span>成片出点</span>
+                                        <input id="dialogue-timeline-end" type="number" min="0.1" step="0.1" value="0.1">
+                                    </label>
+                                    <label>
+                                        <span>素材入点</span>
+                                        <input id="dialogue-source-start" type="number" min="0" step="0.1" value="0.0">
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="slot-segments-panel" style="display:none; margin-top: 10px; padding: 8px; background: rgba(0,0,0,0.18); border: 1px solid rgba(0,242,254,0.12); border-radius: 8px;">
+                                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
+                                    <span style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.04em;">Segments</span>
+                                    <button id="add-segment-btn" class="btn btn-secondary" style="font-size:10px; padding:3px 8px; border-color:rgba(0,242,254,.25); color:#00f2fe;">+ Add shot</button>
+                                </div>
+                                <div id="slot-segments-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+                            </div>
                             <button id="clear-slot-btn" class="btn btn-secondary btn-full" style="display:none; margin-top: 10px; font-size:11px; padding:6px; border-color: rgba(255, 100, 100, 0.25); color: #ff6b6b; font-weight: 500;">
                                 ❌ 取消素材关联 (让上文延续)
                             </button>
@@ -514,6 +565,6 @@
         </div>
     </div>
 
-    <script type="module" src="/assets/app.js?v=29"></script>
+    <script type="module" src="/assets/app.js?v=32"></script>
 </body>
 </html>

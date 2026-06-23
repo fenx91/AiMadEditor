@@ -188,7 +188,7 @@
         const lyricsDiv = document.getElementById('lyrics-container');
         if (lyricsDiv) {
             if (renderData.lyrics && renderData.lyrics.length > 0) {
-                const activeLyric = renderData.lyrics.find(l => time >= l.start && time < l.end);
+                const activeLyric = renderData.lyrics.find(l => !l.is_intro && time >= l.start && time < l.end);
                 if (activeLyric) {
                     lyricsDiv.textContent = activeLyric.text;
                     lyricsDiv.style.display = 'block';
