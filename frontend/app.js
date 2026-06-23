@@ -3,6 +3,7 @@ import { calculateClipTime, findActiveLyricIndex, formatTime, mutePreloadPlayer,
 import { resolveEffectiveSlot } from './js/timeline-model.js';
 import { getEditorElements } from './js/dom.js';
 import { highlightPlayingTranscript, renderBrowserSegments, renderBrowserTranscripts } from './js/video-browser-renderers.js';
+import { buildIndependentDialogueClips, findActiveIndependentDialogue, getDialogueMode, getIndependentDialogueValues } from './js/dialogue-track.js';
 
 // Global error logging for debugging
 window.addEventListener('error', (e) => {
@@ -43,6 +44,12 @@ let currentBrowserVideoId = null;
 let currentBrowserTranscripts = [];
 let currentBrowserSegments = [];
 let currentBrowserTab = 'transcripts';
+
+// Standalone dialogue variables
+let independentDialogueClips = [];
+const independentPlayer = document.createElement('video');
+independentPlayer.style.display = 'none';
+document.body.appendChild(independentPlayer);
 
 // DOM elements
 const el = getEditorElements();
@@ -311,7 +318,14 @@ function buildSlotsPayload() {
                     keep_audio: seg.keep_audio || false,
                     transcript: seg.transcript || "",
                     speaker: resolveSlotSpeaker(seg),
-                    speaker_manual: Boolean(seg.speaker_manual)
+                    speaker_manual: Boolean(seg.speaker_manual),
+                    dialogue_independent: seg.dialogue_independent || false,
+                    dialogue_start_time: seg.dialogue_start_time,
+                    dialogue_end_time: seg.dialogue_end_time,
+                    dialogue_clip_start: seg.dialogue_clip_start,
+                    dialogue_video_path: seg.dialogue_video_path || null,
+                    dialogue_video_name: seg.dialogue_video_name || null,
+                    dialogue_proxy_url: seg.dialogue_proxy_url || null
                 });
             });
         } else {
@@ -326,7 +340,14 @@ function buildSlotsPayload() {
                     keep_audio: effective.keep_audio || false,
                     transcript: effective.transcript || "",
                     speaker: resolveSlotSpeaker(effective),
-                    speaker_manual: Boolean(effective.speaker_manual)
+                    speaker_manual: Boolean(effective.speaker_manual),
+                    dialogue_independent: effective.dialogue_independent || false,
+                    dialogue_start_time: effective.dialogue_start_time,
+                    dialogue_end_time: effective.dialogue_end_time,
+                    dialogue_clip_start: effective.dialogue_clip_start,
+                    dialogue_video_path: effective.dialogue_video_path || null,
+                    dialogue_video_name: effective.dialogue_video_name || null,
+                    dialogue_proxy_url: effective.dialogue_proxy_url || null
                 });
             }
         }
@@ -391,6 +412,7 @@ function refreshTimelineBlocks() {
 
     updateJsonEditorForActiveSlot();
     drawDialogueWaveform();
+    updateIndependentDialogueClips();
 }
 
 // Setup Event Listeners
@@ -529,6 +551,36 @@ function setupEventListeners() {
             }
         });
     }
+
+    if (el.independentDialogueCanvas) {
+        el.independentDialogueCanvas.addEventListener('click', (e) => {
+            if (!songData) return;
+            const rect = el.independentDialogueCanvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const pixelsPerSecond = 20;
+            const targetTime = clickX / pixelsPerSecond;
+            
+            // Find and select corresponding slot when clicking independent dialogue track
+            let clickedIndex = null;
+            for (let i = 0; i < songData.lyrics.length; i++) {
+                const lyric = songData.lyrics[i];
+                if (targetTime >= lyric.start && targetTime <= lyric.end) {
+                    clickedIndex = i;
+                    break;
+                }
+            }
+            if (clickedIndex !== null) {
+                selectSlot(clickedIndex);
+            }
+            
+            audioEl.currentTime = Math.max(0, Math.min(songData.duration, targetTime));
+            updatePlayheadPosition();
+            
+            if (!isPlaying) {
+                updateGlobalPreview(audioEl.currentTime);
+            }
+        });
+    }
     
     // Modals
     el.modalCloseBtn.addEventListener('click', () => {
@@ -576,6 +628,81 @@ function setupEventListeners() {
             updateSegmentOffset(parseInt(input.dataset.segmentIndex, 10), input.dataset.field, input.value);
         });
     }
+    if (el.slotDialogueMode) {
+        el.slotDialogueMode.addEventListener('change', (e) => {
+            const mode = e.target.value;
+            const segment = activeSlotIndex !== null ? getActiveSegment(activeSlotIndex) : null;
+            if (!segment) return;
+            
+            if (mode === 'independent') {
+                segment.dialogue_independent = true;
+                segment.keep_audio = true;
+                
+                // Initialize defaults if empty
+                const lyric = songData.lyrics[activeSlotIndex];
+                const defaultTiming = getIndependentDialogueValues(segment, lyric, audioEl.duration || 0);
+                if (segment.dialogue_start_time === undefined || segment.dialogue_start_time === null) {
+                    segment.dialogue_start_time = defaultTiming.start_time;
+                }
+                if (segment.dialogue_end_time === undefined || segment.dialogue_end_time === null) {
+                    segment.dialogue_end_time = defaultTiming.end_time;
+                }
+                if (segment.dialogue_clip_start === undefined || segment.dialogue_clip_start === null) {
+                    segment.dialogue_clip_start = defaultTiming.clip_start;
+                }
+            } else if (mode === 'linked') {
+                segment.dialogue_independent = false;
+                segment.keep_audio = true;
+            } else {
+                segment.dialogue_independent = false;
+                segment.keep_audio = false;
+            }
+            
+            updateIndependentDialogueClips();
+            drawDialogueWaveform();
+            syncDialogueControls();
+            saveSetup(true);
+        });
+    }
+
+    const handleDialogueTimingChange = () => {
+        const segment = activeSlotIndex !== null ? getActiveSegment(activeSlotIndex) : null;
+        if (!segment) return;
+        
+        segment.dialogue_start_time = parseFloat(el.dialogueTimelineStart.value) || 0;
+        segment.dialogue_end_time = parseFloat(el.dialogueTimelineEnd.value) || 0;
+        segment.dialogue_clip_start = parseFloat(el.dialogueSourceStart.value) || 0;
+        
+        updateIndependentDialogueClips();
+        saveSetup(true);
+    };
+
+    if (el.dialogueTimelineStart) el.dialogueTimelineStart.addEventListener('change', handleDialogueTimingChange);
+    if (el.dialogueTimelineEnd) el.dialogueTimelineEnd.addEventListener('change', handleDialogueTimingChange);
+    if (el.dialogueSourceStart) el.dialogueSourceStart.addEventListener('change', handleDialogueTimingChange);
+    if (el.slotDialogueVideoSelect) {
+        el.slotDialogueVideoSelect.addEventListener('change', (e) => {
+            const segment = activeSlotIndex !== null ? getActiveSegment(activeSlotIndex) : null;
+            if (!segment) return;
+            
+            const selectedPath = e.target.value;
+            if (selectedPath) {
+                const matchedVideo = allIndexedVideos.find(v => v.original_path === selectedPath);
+                segment.dialogue_video_path = selectedPath;
+                segment.dialogue_video_name = selectedPath.split(/[\/\\]/).pop();
+                segment.dialogue_proxy_url = matchedVideo ? matchedVideo.proxy_url : `/api/video_file?path=${encodeURIComponent(selectedPath)}`;
+            } else {
+                segment.dialogue_video_path = null;
+                segment.dialogue_video_name = null;
+                segment.dialogue_proxy_url = null;
+            }
+            
+            updateIndependentDialogueClips();
+            drawDialogueWaveform();
+            saveSetup(true);
+        });
+    }
+
     el.autoMatchAllBtn.addEventListener('click', autoMatchAllSlots);
 
     // Video Browser Modal event handlers
@@ -1140,6 +1267,7 @@ function drawWaveform() {
     
     // Draw dialogue tracks initially
     drawDialogueWaveform();
+    updateIndependentDialogueClips();
 }
 
 // Draw dialogue audio track segments (only where transcript is present)
@@ -1169,6 +1297,7 @@ function drawDialogueWaveform() {
     for (let i = 0; i < songData.lyrics.length; i++) {
         const slot = timelineSlots[i];
         if (!slot?.transcript) continue;
+        if (slot.dialogue_independent) continue; // Skip independent dialogue in camera audio track
 
         const lyric = songData.lyrics[i];
         const startX = lyric.start * pixelsPerSecond;
@@ -1195,6 +1324,72 @@ function drawDialogueWaveform() {
         ctx.font = 'bold 9px sans-serif';
         ctx.fillText(`${mixed ? '🔊' : '🎙️'} [${speaker.toUpperCase()}]`, startX + 6, 13);
     }
+}
+
+function drawIndependentDialogueWaveform() {
+    if (!songData || !el.independentDialogueCanvas) return;
+
+    const canvas = el.independentDialogueCanvas;
+    const ctx = canvas.getContext('2d');
+    const totalWidth = el.waveformCanvas.width;
+    canvas.width = totalWidth;
+    canvas.style.width = `${totalWidth}px`;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const pixelsPerSecond = 20;
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < width; x += 50) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+    }
+
+    independentDialogueClips.forEach(clip => {
+        const startX = clip.start_time * pixelsPerSecond;
+        const endX = clip.end_time * pixelsPerSecond;
+        const clipWidth = endX - startX;
+        if (clipWidth <= 0) return;
+
+        // Draw background box for independent dialogue (using teal: rgba(0, 242, 254, 0.15))
+        ctx.fillStyle = 'rgba(0, 242, 254, 0.15)';
+        ctx.fillRect(startX, 0, clipWidth, height);
+        ctx.strokeStyle = 'rgba(0, 242, 254, 0.5)';
+        ctx.strokeRect(startX, 0, clipWidth, height);
+
+        // Draw waveform lines
+        ctx.fillStyle = 'rgba(0, 242, 254, 0.8)';
+        for (let x = startX + 2; x < endX - 2; x += 3) {
+            const value = Math.sin(x * 0.45) * 0.4 + Math.cos(x * 0.15) * 0.2 + 0.35;
+            const barHeight = Math.max(2, value * (height - 12));
+            ctx.fillRect(x, (height - barHeight) / 2, 2, barHeight);
+        }
+
+        // Draw speaker tag
+        const speaker = (clip.speaker || 'unknown').toUpperCase();
+        ctx.fillStyle = '#e0ffff';
+        ctx.font = 'bold 9px sans-serif';
+        const textToShow = clip.transcript ? `: "${clip.transcript.substring(0, 10)}..."` : '';
+        ctx.fillText(`🎙️ [${speaker}]${textToShow}`, startX + 6, 14);
+    });
+}
+
+function updateIndependentDialogueClips() {
+    if (!songData) {
+        independentDialogueClips = [];
+        return;
+    }
+    independentDialogueClips = buildIndependentDialogueClips(
+        timelineSlots,
+        songData.lyrics,
+        audioEl.duration || songData.lyrics[songData.lyrics.length - 1]?.end || 0,
+        resolveSlotSpeaker
+    );
+    drawIndependentDialogueWaveform();
 }
 
 // Playhead sync
@@ -1298,11 +1493,15 @@ function updateGlobalPreview(curr) {
         
         // 2. Update Monitor Dialogue Subtitle Overlay (Top/Middle)
         const monitorDialogue = document.getElementById('monitor-dialogue-overlay');
+        const activeDialogue = findActiveIndependentDialogue(independentDialogueClips, curr);
         if (monitorDialogue) {
-            if (effective.keep_audio && effective.transcript) {
+            if (activeDialogue && activeDialogue.transcript) {
+                monitorDialogue.textContent = activeDialogue.transcript;
+                monitorDialogue.style.display = 'block';
+                applyDialogueSpeakerColor(monitorDialogue, activeDialogue.speaker);
+            } else if (effective.keep_audio && effective.transcript) {
                 monitorDialogue.textContent = effective.transcript;
                 monitorDialogue.style.display = 'block';
-                
                 applyDialogueSpeakerColor(monitorDialogue, resolveSlotSpeaker(effective));
             } else {
                 monitorDialogue.style.display = 'none';
@@ -1357,8 +1556,15 @@ function updateGlobalPreview(curr) {
         
         // Hide monitor dialogue if gap
         const monitorDialogue = document.getElementById('monitor-dialogue-overlay');
+        const activeDialogue = findActiveIndependentDialogue(independentDialogueClips, curr);
         if (monitorDialogue) {
-            monitorDialogue.style.display = 'none';
+            if (activeDialogue && activeDialogue.transcript) {
+                monitorDialogue.textContent = activeDialogue.transcript;
+                monitorDialogue.style.display = 'block';
+                applyDialogueSpeakerColor(monitorDialogue, activeDialogue.speaker);
+            } else {
+                monitorDialogue.style.display = 'none';
+            }
         }
         
         // Restore BGM volume
@@ -1366,6 +1572,47 @@ function updateGlobalPreview(curr) {
         audioEl.volume = targetMusicVolume;
         
         lastPreviewSlotIndex = null;
+    }
+
+    // Sync independent dialogue player
+    const activeDialogue = findActiveIndependentDialogue(independentDialogueClips, curr);
+    if (activeDialogue) {
+        const resolvedProxyUrl = activeDialogue.proxy_url;
+        const currentSrc = independentPlayer.getAttribute('src');
+        if (currentSrc !== resolvedProxyUrl) {
+            independentPlayer.src = resolvedProxyUrl;
+            independentPlayer.load();
+        }
+        independentPlayer.volume = isMuted ? 0 : clampMediaVolume(dialogueVolume);
+        independentPlayer.muted = isMuted;
+
+        const dialogueClipTime = activeDialogue.clip_start + (curr - activeDialogue.start_time);
+        if (isPlaying) {
+            if (independentPlayer.paused) {
+                if (independentPlayer.dataset.isStarting !== "true") {
+                    independentPlayer.dataset.isStarting = "true";
+                    independentPlayer.currentTime = dialogueClipTime;
+                    independentPlayer.play().then(() => {
+                        independentPlayer.dataset.isStarting = "false";
+                    }).catch(err => {
+                        console.warn("independentPlayer play error:", err);
+                        independentPlayer.dataset.isStarting = "false";
+                    });
+                }
+            } else {
+                independentPlayer.dataset.isStarting = "false";
+                if (shouldResync(independentPlayer.currentTime, dialogueClipTime)) {
+                    independentPlayer.currentTime = dialogueClipTime;
+                }
+            }
+        } else {
+            independentPlayer.pause();
+            independentPlayer.currentTime = dialogueClipTime;
+        }
+    } else {
+        if (!independentPlayer.paused) {
+            independentPlayer.pause();
+        }
     }
 }
 
@@ -1490,6 +1737,7 @@ function updateSpeakerOverride(value) {
 
     syncSlotFromSegment(slot, segment);
     syncSpeakerOverrideControls();
+    syncDialogueControls();
     renderSegmentControls();
     updateJsonEditorForActiveSlot();
     refreshTimelineBlocks();
@@ -1504,8 +1752,57 @@ function selectSegment(index) {
     syncSlotFromSegment(slot, slot.segments[activeSegmentIndex]);
     renderSegmentControls();
     syncSpeakerOverrideControls();
+    syncDialogueControls();
     updatePreviewPlayerForSlot(activeSlotIndex);
     updateJsonEditorForActiveSlot();
+}
+
+function syncDialogueControls() {
+    if (!el.slotDialogueMode || !el.slotDialogueStatus || !el.independentDialogueTiming) return;
+    
+    const segment = activeSlotIndex !== null ? getActiveSegment(activeSlotIndex) : null;
+    if (!segment) {
+        el.slotDialogueMode.value = 'off';
+        el.slotDialogueMode.setAttribute('disabled', 'true');
+        el.slotDialogueStatus.textContent = '先匹配素材';
+        el.slotDialogueStatus.style.color = 'var(--text-muted)';
+        el.independentDialogueTiming.hidden = true;
+        if (el.independentDialogueVideoRow) el.independentDialogueVideoRow.hidden = true;
+        return;
+    }
+    
+    el.slotDialogueMode.removeAttribute('disabled');
+    el.slotDialogueStatus.textContent = segment.transcript ? `台词: "${segment.transcript.substring(0, 10)}..."` : '无台词文本';
+    el.slotDialogueStatus.style.color = 'var(--text-secondary)';
+    
+    const mode = getDialogueMode(segment);
+    el.slotDialogueMode.value = mode;
+    
+    if (mode === 'independent') {
+        el.independentDialogueTiming.hidden = false;
+        if (el.independentDialogueVideoRow) {
+            el.independentDialogueVideoRow.hidden = false;
+            el.slotDialogueVideoSelect.value = segment.dialogue_video_path || '';
+        }
+        
+        const lyric = songData.lyrics[activeSlotIndex];
+        const defaultTiming = getIndependentDialogueValues(segment, lyric, audioEl.duration || 0);
+        
+        el.dialogueTimelineStart.value = (segment.dialogue_start_time !== undefined && segment.dialogue_start_time !== null)
+            ? parseFloat(segment.dialogue_start_time.toFixed(1))
+            : parseFloat(defaultTiming.start_time.toFixed(1));
+            
+        el.dialogueTimelineEnd.value = (segment.dialogue_end_time !== undefined && segment.dialogue_end_time !== null)
+            ? parseFloat(segment.dialogue_end_time.toFixed(1))
+            : parseFloat(defaultTiming.end_time.toFixed(1));
+            
+        el.dialogueSourceStart.value = (segment.dialogue_clip_start !== undefined && segment.dialogue_clip_start !== null)
+            ? parseFloat(segment.dialogue_clip_start.toFixed(1))
+            : parseFloat(defaultTiming.clip_start.toFixed(1));
+    } else {
+        el.independentDialogueTiming.hidden = true;
+        if (el.independentDialogueVideoRow) el.independentDialogueVideoRow.hidden = true;
+    }
 }
 
 function addSegmentToActiveSlot() {
@@ -1584,6 +1881,7 @@ function selectSlot(index) {
     normalizeSlotForSegments(index);
     renderSegmentControls();
     syncSpeakerOverrideControls();
+    syncDialogueControls();
     
     // Mark active in UI
     document.querySelector(`.lyric-item[data-index="${index}"]`)?.classList.add('active');
@@ -2403,6 +2701,7 @@ async function renderVideo() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 slots: slotsPayload,
+                dialogue_clips: buildIndependentDialogueClips(timelineSlots, songData.lyrics, audioEl.duration || songData.lyrics[songData.lyrics.length - 1]?.end || 0, resolveSlotSpeaker),
                 audio_path: songData.audio_path,
                 lyrics: songData.lyrics,
                 music_volume: musicVolume,
@@ -2455,6 +2754,7 @@ async function exportPremiereXml() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 slots: slotsPayload,
+                dialogue_clips: buildIndependentDialogueClips(timelineSlots, songData.lyrics, audioEl.duration || songData.lyrics[songData.lyrics.length - 1]?.end || 0, resolveSlotSpeaker),
                 audio_path: songData.audio_path,
                 lyrics: songData.lyrics,
                 music_volume: musicVolume,
@@ -2589,6 +2889,7 @@ async function saveSetup(isSilent = false) {
     
     const payload = {
         slots: slotsPayload,
+        dialogue_clips: buildIndependentDialogueClips(timelineSlots, songData.lyrics, audioEl.duration || songData.lyrics[songData.lyrics.length - 1]?.end || 0, resolveSlotSpeaker),
         audio_path: songData.audio_path,
         lyrics: songData.lyrics,
         music_volume: musicVolume,
@@ -2770,6 +3071,7 @@ async function loadSetup(isSilent = false, setupName = "default") {
             if (idx !== -1) {
                 const lyric = songData.lyrics[idx];
                 const matchedVideo = allIndexedVideos.find(v => v.original_path === slot.video_path);
+                const dialogueVideo = slot.dialogue_video_path ? allIndexedVideos.find(v => v.original_path === slot.dialogue_video_path) : null;
                 const segment = {
                     video_path: slot.video_path,
                     video_name: slot.video_path.split(/[\/\\]/).pop(),
@@ -2783,7 +3085,14 @@ async function loadSetup(isSilent = false, setupName = "default") {
                     speaker_manual: Boolean(slot.speaker_manual),
                     frame_url: matchedVideo ? `/data/keyframes/${matchedVideo.original_path.split(/[\/\\]/).pop().replace(/\.\w+$/, '')}_kf.jpg` : '',
                     offset_start: Math.max(0, slot.start_time - lyric.start),
-                    offset_end: Math.min(lyric.end - lyric.start, slot.end_time - lyric.start)
+                    offset_end: Math.min(lyric.end - lyric.start, slot.end_time - lyric.start),
+                    dialogue_independent: slot.dialogue_independent || false,
+                    dialogue_start_time: slot.dialogue_start_time,
+                    dialogue_end_time: slot.dialogue_end_time,
+                    dialogue_clip_start: slot.dialogue_clip_start,
+                    dialogue_video_path: slot.dialogue_video_path || null,
+                    dialogue_video_name: slot.dialogue_video_name || (slot.dialogue_video_path ? slot.dialogue_video_path.split(/[\/\\]/).pop() : null),
+                    dialogue_proxy_url: slot.dialogue_proxy_url || (dialogueVideo ? dialogueVideo.proxy_url : (slot.dialogue_video_path ? `/api/video_file?path=${encodeURIComponent(slot.dialogue_video_path)}` : null))
                 };
                 if (!timelineSlots[idx]) {
                     timelineSlots[idx] = { ...segment, segments: [segment] };
@@ -2801,6 +3110,7 @@ async function loadSetup(isSilent = false, setupName = "default") {
             }
         });
         activeSegmentIndex = 0;
+        updateIndependentDialogueClips();
         
         // Update UI
         refreshTimelineBlocks();
@@ -2830,18 +3140,31 @@ async function loadSetup(isSilent = false, setupName = "default") {
 
 // Populates manual video select dropdown from allIndexedVideos
 function populateManualVideoSelect() {
-    if (!el.manualVideoSelect) return;
-    
-    el.manualVideoSelect.innerHTML = '<option value="">-- 请选择索引库中的视频 --</option>';
-    allIndexedVideos.forEach(vid => {
-        const option = document.createElement('option');
-        option.value = vid.original_path;
-        const fileName = vid.original_path.split('/').pop();
-        option.textContent = `${fileName} (${vid.duration.toFixed(1)}s)`;
-        option.dataset.proxyUrl = vid.proxy_url;
-        option.dataset.duration = vid.duration;
-        el.manualVideoSelect.appendChild(option);
-    });
+    if (el.manualVideoSelect) {
+        el.manualVideoSelect.innerHTML = '<option value="">-- 请选择索引库中的视频 --</option>';
+        allIndexedVideos.forEach(vid => {
+            const option = document.createElement('option');
+            option.value = vid.original_path;
+            const fileName = vid.original_path.split('/').pop();
+            option.textContent = `${fileName} (${vid.duration.toFixed(1)}s)`;
+            option.dataset.proxyUrl = vid.proxy_url;
+            option.dataset.duration = vid.duration;
+            el.manualVideoSelect.appendChild(option);
+        });
+    }
+
+    if (el.slotDialogueVideoSelect) {
+        el.slotDialogueVideoSelect.innerHTML = '<option value="">-- 默认跟随主镜头素材 --</option>';
+        allIndexedVideos.forEach(vid => {
+            const option = document.createElement('option');
+            option.value = vid.original_path;
+            const fileName = vid.original_path.split('/').pop();
+            option.textContent = `${fileName} (${vid.duration.toFixed(1)}s)`;
+            option.dataset.proxyUrl = vid.proxy_url;
+            option.dataset.duration = vid.duration;
+            el.slotDialogueVideoSelect.appendChild(option);
+        });
+    }
 }
 
 // Adjusts the clip trimmer start time by a step value (amount)

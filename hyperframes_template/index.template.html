@@ -81,6 +81,7 @@
 
     let renderData = null;
     let videoElements = [];
+    let dialogueVideoElements = [];
     let isPlaying = false;
     let globalTime = 0;
     let audio = null;
@@ -103,6 +104,7 @@
     function initTemplate() {
         const viewport = document.getElementById('viewport');
         videoElements = [];
+        dialogueVideoElements = [];
         currentShowingIndex = -1;
         
         // Set metadata attributes for HyperFrames renderer compatibility
@@ -114,7 +116,7 @@
         // Register composition timeline
         window.__timelines = window.__timelines || {};
         if (isRendering) {
-            // Register a native GSAP timeline for HyperFrames capture engine to seek.
+            // Register a GSAP timeline for HyperFrames capture engine to seek.
             // This allows the HyperFrames frame-by-frame renderer to automatically
             // map and inject video frames based on data-start and data-duration.
             const tl = gsap.timeline({ paused: true });
@@ -142,7 +144,7 @@
         }
 
         // Retrieve static Video Elements from DOM (from viewport container)
-        videoElements = Array.from(viewport.querySelectorAll('video'));
+        videoElements = Array.from(viewport.querySelectorAll('video.video-layer'));
         videoElements.forEach((video, index) => {
             if (isRendering) {
                 // In headless render, let HyperFrames engine handle styles
@@ -153,6 +155,13 @@
                 video.style.display = 'none';
                 video.load();
             }
+        });
+
+        // Retrieve static dialogue elements
+        dialogueVideoElements = Array.from(viewport.querySelectorAll('video.dialogue-layer'));
+        dialogueVideoElements.forEach((video) => {
+            video.style.display = 'none';
+            video.load();
         });
 
         // Show HUD if debugging or if run in non-headless browser
@@ -180,7 +189,8 @@
         if (!renderData) return Promise.resolve();
         
         const activeIndex = getActiveSlotIndex(time);
-        console.log(`[updateTimeline] time=${time.toFixed(3)} isRendering=${isRendering} activeIndex=${activeIndex}`);
+        const activeDialogueIndex = renderData.dialogueClips ? renderData.dialogueClips.findIndex(d => time >= d.startTime && time < d.endTime) : -1;
+        console.log(`[updateTimeline] time=${time.toFixed(3)} isRendering=${isRendering} activeIndex=${activeIndex} activeDialogueIndex=${activeDialogueIndex}`);
         
         document.getElementById('hud-time').textContent = time.toFixed(2) + 's';
         
@@ -200,6 +210,53 @@
             }
         }
         
+        const targetMusicVolume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
+        const targetDialogueVolume = renderData.dialogueVolume !== undefined ? renderData.dialogueVolume : 1.0;
+
+        // Update dialogue subtitles overlay dynamically
+        const dialogueDiv = document.getElementById('dialogue-container');
+        if (dialogueDiv) {
+            let showDialogue = false;
+            let dialogueText = '';
+            let speaker = '';
+            
+            if (activeDialogueIndex !== -1) {
+                const d_clip = renderData.dialogueClips[activeDialogueIndex];
+                if (d_clip.transcript) {
+                    showDialogue = true;
+                    dialogueText = d_clip.transcript;
+                    speaker = d_clip.speaker;
+                }
+            } else if (activeIndex !== -1) {
+                const slot = renderData.slots[activeIndex];
+                if (slot.keepAudio && slot.transcript) {
+                    showDialogue = true;
+                    dialogueText = slot.transcript;
+                    speaker = slot.speaker;
+                }
+            }
+            
+            if (showDialogue) {
+                dialogueDiv.textContent = dialogueText;
+                dialogueDiv.style.display = 'block';
+                
+                const spk = (speaker || '').toLowerCase();
+                if (spk === 'tayama') {
+                    dialogueDiv.style.color = '#00f2fe';
+                } else if (spk === 'sasaki') {
+                    dialogueDiv.style.color = '#ffcc00';
+                } else if (spk === 'yamada') {
+                    dialogueDiv.style.color = '#ff80bf';
+                } else {
+                    dialogueDiv.style.color = '#ffffff';
+                }
+                dialogueDiv.style.textShadow = '0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95)';
+            } else {
+                dialogueDiv.style.display = 'none';
+            }
+        }
+
+        // Active slot visuals & BGM/Linked Audio controls
         if (activeIndex !== -1) {
             const slot = renderData.slots[activeIndex];
             const activeVideo = videoElements[activeIndex];
@@ -209,32 +266,6 @@
             const clipTime = time - slot.startTime; // relative offset since we don't pad anymore
             document.getElementById('hud-clip').textContent = `CLIP: ${filename} (at ${clipTime.toFixed(2)}s)`;
             
-            // Update dialogue subtitles overlay dynamically
-            const dialogueDiv = document.getElementById('dialogue-container');
-            if (dialogueDiv) {
-                if (slot.keepAudio && slot.transcript) {
-                    dialogueDiv.textContent = slot.transcript;
-                    dialogueDiv.style.display = 'block';
-                    
-                    const speaker = (slot.speaker || '').toLowerCase();
-                    if (speaker === 'tayama') {
-                        dialogueDiv.style.color = '#00f2fe';
-                    } else if (speaker === 'sasaki') {
-                        dialogueDiv.style.color = '#ffcc00';
-                    } else if (speaker === 'yamada') {
-                        dialogueDiv.style.color = '#ff80bf';
-                    } else {
-                        dialogueDiv.style.color = '#ffffff';
-                    }
-                    dialogueDiv.style.textShadow = '0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95)';
-                } else {
-                    dialogueDiv.style.display = 'none';
-                }
-            }
-            
-            const targetMusicVolume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
-            const targetDialogueVolume = renderData.dialogueVolume !== undefined ? renderData.dialogueVolume : 1.0;
-
             if (isRendering) {
               // Headless render: Let HyperFrames own video playback, visibility, and frame injection.
               // Just sync audio volumes to let the capture engine extract/mix them correctly.
@@ -264,10 +295,6 @@
                 }
               }
             }
-            
-            if (audio) {
-              audio.volume = targetMusicVolume;
-            }
         } else {
             // Outside slots
             if (!isRendering) {
@@ -277,17 +304,39 @@
                 });
             }
             currentShowingIndex = -1;
-            
-            // Hide dialogue when outside slots
-            const dialogueDiv = document.getElementById('dialogue-container');
-            if (dialogueDiv) {
-                dialogueDiv.style.display = 'none';
-            }
-            
-            // Restore BGM volume
-            if (audio) {
-                audio.volume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
-            }
+            document.getElementById('hud-clip').textContent = `CLIP: None`;
+        }
+
+        // Playback controls for independent dialogue clips (browser preview mode)
+        if (renderData.dialogueClips && !isRendering) {
+            dialogueVideoElements.forEach((d_video, idx) => {
+                const d_clip = renderData.dialogueClips[idx];
+                if (idx === activeDialogueIndex) {
+                    d_video.muted = false;
+                    d_video.volume = targetDialogueVolume;
+                    
+                    const clipTime = time - d_clip.startTime;
+                    const duration = d_video.duration;
+                    if (!isNaN(duration) && duration > 0) {
+                        const timeDiff = Math.abs(d_video.currentTime - clipTime);
+                        if (timeDiff > 0.45) {
+                            d_video.currentTime = clipTime;
+                        }
+                    }
+                    if (isPlaying) {
+                        d_video.play().catch(e => {});
+                    } else {
+                        d_video.pause();
+                    }
+                } else {
+                    d_video.muted = true;
+                    if (!d_video.paused) d_video.pause();
+                }
+            });
+        }
+        
+        if (audio) {
+            audio.volume = targetMusicVolume;
         }
         
         return Promise.resolve();

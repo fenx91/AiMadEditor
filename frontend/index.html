@@ -180,15 +180,15 @@
                                 <div class="track-row-label">🎚️ 镜头原声</div>
                                 <canvas id="dialogue-waveform-canvas" height="34"></canvas>
                             </div>
-                            <div class="timeline-track-row independent-dialogue-track-row">
-                                <div class="track-row-label">🎙️ 独立台词</div>
-                                <canvas id="independent-dialogue-canvas" height="42"></canvas>
-                            </div>
                             <div class="timeline-track-row lyric-track-row">
                                 <div class="track-row-label">✍️ 歌词</div>
                                 <div class="track-items" id="lyric-track-items">
                                     <!-- Clickable lyric blocks are rendered here -->
                                 </div>
+                            </div>
+                            <div class="timeline-track-row independent-dialogue-track-row">
+                                <div class="track-row-label">🎙️ 独立台词</div>
+                                <canvas id="independent-dialogue-canvas" height="42"></canvas>
                             </div>
                             <div class="playhead" id="playhead"></div>
                         </div>
@@ -318,6 +318,14 @@
                                     </select>
                                     <span id="slot-dialogue-status">先匹配素材</span>
                                 </div>
+                                <div id="independent-dialogue-video-row" style="margin-top: 8px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 8px;" hidden>
+                                    <div class="slot-control-row" style="margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+                                        <label for="slot-dialogue-video-select" style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">🎙️ 台词视频源</label>
+                                    </div>
+                                    <select id="slot-dialogue-video-select" style="width: 100%; padding: 5px 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; outline: none; box-sizing: border-box;">
+                                        <option value="">-- 默认跟随主镜头素材 --</option>
+                                    </select>
+                                </div>
                                 <div id="independent-dialogue-timing" class="independent-dialogue-timing" hidden>
                                     <label>
                                         <span>成片入点</span>
@@ -331,6 +339,13 @@
                                         <span>素材入点</span>
                                         <input id="dialogue-source-start" type="number" min="0" step="0.1" value="0.0">
                                     </label>
+                                </div>
+                                <div id="independent-dialogue-help" style="margin-top: 10px; padding: 10px; background: rgba(0, 242, 254, 0.04); border: 1px solid rgba(0, 242, 254, 0.12); border-radius: 8px; font-size: 11px; line-height: 1.5; color: var(--text-secondary);">
+                                    <strong style="color: #00f2fe; display: block; margin-bottom: 4px;">🎙️ 独立台词操作指南:</strong>
+                                    1. 匹配素材后，将台词播放设为<strong>独立音轨</strong>。<br>
+                                    2. 调整<strong>成片入点/出点</strong>来控制它在 MV 中的播放时间段，可轻松跨越当前镜头！<br>
+                                    3. 调整<strong>素材入点</strong>设定原视频中要截取的音频起点。<br>
+                                    4. 可在<strong>台词视频源</strong>中灵活选择并匹配不同的台词音轨源视频！
                                 </div>
                             </div>
                             <div id="slot-segments-panel" style="display:none; margin-top: 10px; padding: 8px; background: rgba(0,0,0,0.18); border: 1px solid rgba(0,242,254,0.12); border-radius: 8px;">

@@ -42,6 +42,11 @@ class TimelineSlot(BaseModel):
     transcript: Optional[str] = ""
     speaker: Optional[str] = "unknown"
     speaker_manual: Optional[bool] = False
+    dialogue_independent: Optional[bool] = False
+    dialogue_start_time: Optional[float] = None
+    dialogue_end_time: Optional[float] = None
+    dialogue_clip_start: Optional[float] = None
+    dialogue_video_path: Optional[str] = None
 
 
 class DialogueClip(BaseModel):
@@ -73,6 +78,7 @@ class RenderRequest(BaseModel):
     range_start: Optional[float] = None
     range_end: Optional[float] = None
     setup_name: Optional[str] = None
+    dialogue_clips: Optional[List[DialogueClip]] = None
 
 
 class LyricLine(BaseModel):

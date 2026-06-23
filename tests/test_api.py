@@ -166,3 +166,73 @@ def test_api_video_segments_and_match():
                 os.remove(test_db)
             except OSError:
                 pass
+
+
+def test_api_render_with_dialogue_clips():
+    # Mock render_video and export_xml to avoid actual subprocess calls
+    with patch('backend.app.render_video') as mock_render, \
+         patch('backend.app.export_xml') as mock_export:
+        
+        mock_render.return_value = {"status": "success", "output_path": "fake.mp4", "output_url": "/fake.mp4"}
+        mock_export.return_value = "fake xml"
+        
+        # Build render request payload with independent dialogue fields in slots
+        # and a dialogue_clips list.
+        render_req = {
+            "slots": [
+                {
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "video_path": "video.mp4",
+                    "clip_start": 5.0,
+                    "clip_duration": 2.0,
+                    "keep_audio": True,
+                    "transcript": "hello",
+                    "speaker": "tayama",
+                    "speaker_manual": True,
+                    "dialogue_independent": True,
+                    "dialogue_start_time": 0.0,
+                    "dialogue_end_time": 2.0,
+                    "dialogue_clip_start": 5.0,
+                    "dialogue_video_path": "other_video.mp4"
+                }
+            ],
+            "dialogue_clips": [
+                {
+                    "start_time": 1.0,
+                    "end_time": 3.0,
+                    "video_path": "other_video.mp4",
+                    "clip_start": 10.0,
+                    "clip_duration": 2.0,
+                    "transcript": "world",
+                    "speaker": "sasaki",
+                    "speaker_manual": False,
+                    "source_slot_index": 0,
+                    "source_segment_index": 0
+                }
+            ],
+            "audio_path": "audio.mp3",
+            "music_volume": 0.8,
+            "dialogue_volume": 0.9
+        }
+        
+        # Call /api/render
+        response = client.post("/api/render", json=render_req)
+        assert response.status_code == 200
+        
+        # Verify mock_render was called with RenderRequest object containing the new fields
+        called_req = mock_render.call_args[0][0]
+        assert called_req.slots[0].dialogue_independent is True
+        assert called_req.slots[0].dialogue_start_time == 0.0
+        assert called_req.slots[0].dialogue_end_time == 2.0
+        assert called_req.slots[0].dialogue_clip_start == 5.0
+        assert called_req.slots[0].dialogue_video_path == "other_video.mp4"
+        
+        assert len(called_req.dialogue_clips) == 1
+        assert called_req.dialogue_clips[0].video_path == "other_video.mp4"
+        assert called_req.dialogue_clips[0].transcript == "world"
+        assert called_req.dialogue_clips[0].speaker == "sasaki"
+        
+        # Call /api/export_xml
+        response_xml = client.post("/api/export_xml", json=render_req)
+        assert response_xml.status_code == 200

@@ -582,7 +582,7 @@ body {
 
 /* Timeline Card */
 .timeline-card {
-    height: 240px;
+    height: 290px;
     display: flex;
     flex-direction: column;
     padding: 12px;
@@ -1379,5 +1379,86 @@ video::-umd-media-controls-fullscreen-button {
     border-color: rgba(199, 181, 255, 0.45);
     color: rgba(235, 229, 255, 0.9);
     font-style: italic;
+}
+
+/* Independent Dialogue Track Styling */
+.independent-dialogue-track-row {
+    height: 42px;
+    background: rgba(0, 242, 254, 0.02);
+}
+
+#independent-dialogue-canvas {
+    width: 100%;
+    display: block;
+}
+
+/* Dialogue Controls in right panel */
+.slot-dialogue-controls {
+    margin-top: 12px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+
+.slot-control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.slot-control-row label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.slot-control-row select {
+    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 11px;
+    outline: none;
+}
+
+#slot-dialogue-status {
+    font-size: 10px;
+    color: var(--text-muted);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.independent-dialogue-timing {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.1);
+    padding-top: 8px;
+}
+
+.independent-dialogue-timing label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.independent-dialogue-timing input {
+    width: 100%;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 11px;
+    font-family: var(--font-mono);
 }
 

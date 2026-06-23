@@ -141,13 +141,21 @@ def render_video(req: RenderRequest):
         abs_audio = os.path.abspath(req.audio_path)
         
         # Prepare slots for HyperFrames rendering
-        # Clean up old temp videos that exceed the current request's slot count
+        # Clean up old temp videos and dialogue videos
         num_slots = len(req.slots)
+        num_dialogues = len(req.dialogue_clips) if req.dialogue_clips else 0
         for f in os.listdir("hyperframes_template"):
             if f.startswith("temp_video_") and f.endswith(".mp4"):
                 try:
                     idx = int(f.replace("temp_video_", "").replace(".mp4", ""))
                     if idx >= num_slots:
+                        os.remove(os.path.join("hyperframes_template", f))
+                except (ValueError, OSError):
+                    pass
+            elif f.startswith("temp_dialogue_") and f.endswith(".mp4"):
+                try:
+                    idx = int(f.replace("temp_dialogue_", "").replace(".mp4", ""))
+                    if idx >= num_dialogues:
                         os.remove(os.path.join("hyperframes_template", f))
                 except (ValueError, OSError):
                     pass
@@ -243,9 +251,99 @@ def render_video(req: RenderRequest):
                 "transcript": slot.transcript,
                 "speaker": slot.speaker
             })
+
+        # Prepare independent dialogue clips for HyperFrames rendering
+        dialogue_clips_data = []
+        if req.dialogue_clips:
+            for d_idx, d_clip in enumerate(req.dialogue_clips):
+                abs_video_path = os.path.abspath(d_clip.video_path)
+                resolved_path = abs_video_path
+                
+                # If format is not directly supported in Chrome, map to high-res rendering proxy
+                if abs_video_path.lower().endswith(('.mkv', '.avi', '.mov', '.flv')):
+                    resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
+                    print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
+                
+                import hashlib
+                d_duration = d_clip.end_time - d_clip.start_time
+                
+                # Construct a unique cache key based on video path, clip start, and duration
+                cache_key_str = f"dialogue_{resolved_path}_{d_clip.clip_start}_{d_duration}"
+                cache_hash = hashlib.md5(cache_key_str.encode("utf-8")).hexdigest()
+                cache_dir = os.path.abspath("data/trimmed_cache")
+                os.makedirs(cache_dir, exist_ok=True)
+                cache_path = os.path.join(cache_dir, f"{cache_hash}.mp4")
+                
+                temp_name = f"temp_dialogue_{d_idx}.mp4"
+                temp_path = os.path.join("hyperframes_template", temp_name)
+                
+                use_cached = False
+                if os.path.exists(cache_path):
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                        os.link(cache_path, temp_path)
+                        use_cached = True
+                        print(f"Reused cached trim for dialogue {d_idx}: {cache_path}")
+                    except Exception:
+                        try:
+                            shutil.copy2(cache_path, temp_path)
+                            use_cached = True
+                            print(f"Copied cached trim for dialogue {d_idx}: {cache_path}")
+                        except Exception as ce:
+                            print(f"Failed to reuse cache for dialogue {d_idx}: {ce}")
+                
+                ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+                clip_start_val = 0.0
+                clip_dur_val = d_duration
+                
+                if not use_cached:
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
+                    
+                    trim_cmd = [
+                        ffmpeg, "-y",
+                        "-ss", str(d_clip.clip_start),
+                        "-t", str(d_duration),
+                        "-i", resolved_path,
+                        "-c:v", "libx264", "-crf", "18", "-preset", "ultrafast",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-b:a", "192k",
+                        temp_path
+                    ]
+                    
+                    print(f"Trimming dialogue {d_idx}: {resolved_path} from {d_clip.clip_start}s to {d_clip.clip_start + d_duration}s...")
+                    trim_res = subprocess.run(trim_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    if trim_res.returncode == 0:
+                        try:
+                            shutil.copy2(temp_path, cache_path)
+                        except Exception as ce:
+                            print(f"Failed to save to cache: {ce}")
+                    else:
+                        print(f"  Dialogue trim failed: {trim_res.stderr.decode()[:200]}. Falling back to link/copy...")
+                        try:
+                            os.link(resolved_path, temp_path)
+                        except Exception:
+                            shutil.copy2(resolved_path, temp_path)
+                        clip_start_val = d_clip.clip_start
+                        clip_dur_val = d_duration
+                    
+                dialogue_clips_data.append({
+                    "startTime": d_clip.start_time,
+                    "endTime": d_clip.end_time,
+                    "videoPath": temp_name,
+                    "clipStart": clip_start_val,
+                    "clipDuration": clip_dur_val,
+                    "transcript": d_clip.transcript,
+                    "speaker": d_clip.speaker
+                })
             
         render_data = {
             "slots": slots_data,
+            "dialogueClips": dialogue_clips_data,
             "audioPath": abs_audio,
             "lyrics": req.lyrics if req.lyrics else [],
             "musicVolume": req.music_volume if req.music_volume is not None else 1.0,
@@ -278,6 +376,15 @@ def render_video(req: RenderRequest):
                 video_tags.append(
                     f'<video class="video-layer" id="video_{i}" src="{slot["videoPath"]}" data-start="{slot["startTime"]}" data-duration="{slot_duration}" preload="auto" {audio_attr}></video>'
                 )
+            
+            # Generate static independent dialogue audio/video elements HTML
+            for j, d_clip in enumerate(dialogue_clips_data):
+                d_dur = d_clip["endTime"] - d_clip["startTime"]
+                # Since these are independent dialogues, they should be unmuted (volume=dialogue_vol)
+                video_tags.append(
+                    f'<video class="dialogue-layer" id="dialogue_video_{j}" src="{d_clip["videoPath"]}" data-start="{d_clip["startTime"]}" data-duration="{d_dur}" preload="auto" volume="{dialogue_vol}" style="display:none;"></video>'
+                )
+                
             video_elements_html = "\n    ".join(video_tags)
             
             with open("hyperframes_template/index.template.html", "r", encoding="utf-8") as f:
@@ -414,6 +521,14 @@ def export_xml(req: RenderRequest):
             if abs_v_path not in video_files:
                 video_files[abs_v_path] = len(video_files) + 1
                 
+        if req.dialogue_clips:
+            for d_clip in req.dialogue_clips:
+                abs_v_path = os.path.abspath(d_clip.video_path)
+                if abs_v_path not in video_files:
+                    video_files[abs_v_path] = len(video_files) + 1
+                    
+        written_files = set()
+        
         for i, slot in enumerate(req.slots):
             abs_v_path = os.path.abspath(slot.video_path)
             file_index = video_files[abs_v_path]
@@ -428,6 +543,20 @@ def export_xml(req: RenderRequest):
             source_dur_secs = slot.clip_duration if slot.clip_duration else (slot.end_time - slot.start_time)
             source_dur_frames = to_frames(max(source_dur_secs, 1000.0))
             
+            if file_index not in written_files:
+                file_tag = f"""<file id="file-{file_index}">
+              <name>{xml.sax.saxutils.escape(clip_name)}</name>
+              <pathurl>{xml.sax.saxutils.escape(v_url)}</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+              <duration>{source_dur_frames}</duration>
+            </file>"""
+                written_files.add(file_index)
+            else:
+                file_tag = f"""<file id="file-{file_index}"/>"""
+            
             # Video track clip item
             v_clip = f"""          <clipitem id="video-clip-{i}">
             <name>{xml.sax.saxutils.escape(clip_name)}</name>
@@ -440,15 +569,7 @@ def export_xml(req: RenderRequest):
             <out>{out_f}</out>
             <start>{start_f}</start>
             <end>{end_f}</end>
-            <file id="file-{file_index}">
-              <name>{xml.sax.saxutils.escape(clip_name)}</name>
-              <pathurl>{xml.sax.saxutils.escape(v_url)}</pathurl>
-              <rate>
-                <timebase>24</timebase>
-                <ntsc>TRUE</ntsc>
-              </rate>
-              <duration>{source_dur_frames}</duration>
-            </file>
+            {file_tag}
           </clipitem>"""
             video_clips.append(v_clip)
             
@@ -483,6 +604,67 @@ def export_xml(req: RenderRequest):
             <file id="file-{file_index}"/>
           </clipitem>"""
                 dialogue_clips_r.append(audio_clip_r)
+                
+        independent_clips_l = []
+        independent_clips_r = []
+        if req.dialogue_clips:
+            for i, d_clip in enumerate(req.dialogue_clips):
+                abs_v_path = os.path.abspath(d_clip.video_path)
+                file_index = video_files[abs_v_path]
+                clip_name = os.path.basename(abs_v_path)
+                v_url = get_path_url(abs_v_path)
+                
+                start_f = to_frames(d_clip.start_time)
+                end_f = to_frames(d_clip.end_time)
+                in_f = to_frames(d_clip.clip_start)
+                out_f = to_frames(d_clip.clip_start + (d_clip.end_time - d_clip.start_time))
+                
+                source_dur_secs = d_clip.clip_duration if d_clip.clip_duration else (d_clip.end_time - d_clip.start_time)
+                source_dur_frames = to_frames(max(source_dur_secs, 1000.0))
+                
+                if file_index not in written_files:
+                    file_tag = f"""<file id="file-{file_index}">
+              <name>{xml.sax.saxutils.escape(clip_name)}</name>
+              <pathurl>{xml.sax.saxutils.escape(v_url)}</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+              <duration>{source_dur_frames}</duration>
+            </file>"""
+                    written_files.add(file_index)
+                else:
+                    file_tag = f"""<file id="file-{file_index}"/>"""
+                
+                audio_clip_l = f"""          <clipitem id="independent-clip-{i}-l">
+            <name>{xml.sax.saxutils.escape(clip_name)} (独立台词)</name>
+            <duration>{source_dur_frames}</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+            <in>{in_f}</in>
+            <out>{out_f}</out>
+            <start>{start_f}</start>
+            <end>{end_f}</end>
+            {file_tag}
+          </clipitem>"""
+                independent_clips_l.append(audio_clip_l)
+                
+                audio_clip_r = f"""          <clipitem id="independent-clip-{i}-r">
+            <name>{xml.sax.saxutils.escape(clip_name)} (独立台词)</name>
+            <duration>{source_dur_frames}</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+            <in>{in_f}</in>
+            <out>{out_f}</out>
+            <start>{start_f}</start>
+            <end>{end_f}</end>
+            <file id="file-{file_index}"/>
+          </clipitem>"""
+                independent_clips_r.append(audio_clip_r)
                 
         bgm_clip_l = f"""          <clipitem id="bgm-clip-l">
             <name>{xml.sax.saxutils.escape(bgm_name)}</name>
@@ -524,6 +706,19 @@ def export_xml(req: RenderRequest):
         dialogue_clips_l_xml = "\n".join(dialogue_clips_l)
         dialogue_clips_r_xml = "\n".join(dialogue_clips_r)
         
+        num_channels = 4
+        extra_tracks = ""
+        if independent_clips_l:
+            num_channels = 6
+            independent_clips_l_xml = "\n".join(independent_clips_l)
+            independent_clips_r_xml = "\n".join(independent_clips_r)
+            extra_tracks = f"""        <track>
+{independent_clips_l_xml}
+        </track>
+        <track>
+{independent_clips_r_xml}
+        </track>"""
+        
         xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE xmeml SYSTEM "fcpxml.dtd">
 <xmeml version="5">
@@ -552,7 +747,7 @@ def export_xml(req: RenderRequest):
         </track>
       </video>
       <audio>
-        <numChannels>4</numChannels>
+        <numChannels>{num_channels}</numChannels>
         <track>
 {bgm_clip_l}
         </track>
@@ -565,6 +760,7 @@ def export_xml(req: RenderRequest):
         <track>
 {dialogue_clips_r_xml}
         </track>
+{extra_tracks}
       </audio>
     </media>
   </sequence>
