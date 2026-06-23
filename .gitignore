@@ -11,13 +11,7 @@ node/
 node_modules/
 
 # Databases and temporary media data
-data/metadata.db
-data/music/*
-!data/music/.gitkeep
-data/proxies/*
-!data/proxies/.gitkeep
-data/keyframes/*
-!data/keyframes/.gitkeep
+data/
 
 # Raw video inputs directories
 in/
@@ -29,7 +23,7 @@ output/*
 
 # Dynamically generated rendering workspace files
 hyperframes_template/temp_video_*
-hyperframes_template/render_data.json
+hyperframes_template/render_data.json*
 hyperframes_template/audio*
 hyperframes_template/index.html
 
