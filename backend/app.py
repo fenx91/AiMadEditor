@@ -37,6 +37,19 @@ async def lifespan(app: FastAPI):
     # Initialize SQLite database structure
     init_db(DB_PATH)
     
+    # Invalidate match cache once on startup to ensure new prompt takes effect
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='match_cache'")
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM match_cache")
+            conn.commit()
+            print("[Startup] Cleared match_cache to apply updated prompt instructions.")
+        conn.close()
+    except Exception as e:
+        print(f"[Startup] Failed to clear match_cache: {e}")
+        
     # Initialize Feature Extractor (CLIP)
     try:
         extractor = FeatureExtractor()
@@ -100,6 +113,9 @@ class RenderRequest(BaseModel):
     lyrics: Optional[List[dict]] = None
     music_volume: Optional[float] = 1.0
     dialogue_volume: Optional[float] = 1.0
+    range_start: Optional[float] = None
+    range_end: Optional[float] = None
+    setup_name: Optional[str] = None
 
 @app.get("/")
 def read_root():
@@ -685,6 +701,42 @@ motion_preference 严格选一："low" / "medium" / "high"
         raise HTTPException(status_code=500, detail=f"Failed to parse script plan JSON: {str(e)}\nRaw response: {text}")
 
 
+@app.post("/api/get_script_plan_cache")
+def api_get_script_plan_cache(req: ScriptPlanRequest):
+    import hashlib as _hashlib
+    lyrics_key = json.dumps([l.text for l in req.lyrics], ensure_ascii=False, sort_keys=True)
+    lyrics_hash = _hashlib.md5(lyrics_key.encode("utf-8")).hexdigest()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT outline_json FROM script_outline_cache WHERE lyrics_hash = ?", (lyrics_hash,))
+        cached_row = cur.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"[ScriptPlan] Cache read error: {e}")
+        cached_row = None
+
+    if cached_row:
+        try:
+            cached_sections = json.loads(cached_row[0])
+            script_plan = []
+            for section in cached_sections:
+                section_name = section.get("section_name", "")
+                mood_arc = section.get("mood_arc", "")
+                for line in section.get("lines", []):
+                    line["section_name"] = section_name
+                    line["mood_arc"] = mood_arc
+                    line["narrative_concept"] = section.get("narrative_concept", "")
+                    line["visual_pacing"] = section.get("visual_pacing", "")
+                    script_plan.append(line)
+            script_plan.sort(key=lambda x: x.get("index", 0))
+            return {"success": True, "script_plan": script_plan}
+        except Exception as e:
+            print(f"[ScriptPlan] Failed to parse cached outline: {e}")
+    
+    return {"success": False, "message": "No cache found"}
+
+
 @app.delete("/api/script_outline_cache")
 def api_clear_script_outline_cache():
     """Clear the cached section outline so the next generate_script_plan call regenerates from scratch."""
@@ -696,6 +748,21 @@ def api_clear_script_outline_cache():
         conn.commit()
         conn.close()
         return {"message": f"Cleared {deleted} cached outline(s)."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/match_cache")
+def api_clear_match_cache():
+    """Clear the cached match recommendations so that matches are recalculated with the new prompt logic."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM match_cache")
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        print(f"[API] Cleared {deleted} cached match recommendations.")
+        return {"message": f"Cleared {deleted} cached match recommendations."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -924,9 +991,10 @@ def get_high_res_render_proxy(original_path):
     # Try GPU NVENC with keyframe interval of 30 (GOP=30) for fast seeking
     cmd_gpu = [
         ffmpeg, "-y",
-        "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+        "-hwaccel", "cuda",
         "-i", original_path,
         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "20",
+        "-pix_fmt", "yuv420p",
         "-g", "30", "-keyint_min", "30",
         "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k", render_proxy_path
@@ -936,6 +1004,7 @@ def get_high_res_render_proxy(original_path):
         ffmpeg, "-y",
         "-i", original_path,
         "-c:v", "libx264", "-crf", "20", "-preset", "fast",
+        "-pix_fmt", "yuv420p",
         "-g", "30", "-keyint_min", "30",
         "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k", render_proxy_path
@@ -954,25 +1023,104 @@ def get_high_res_render_proxy(original_path):
 @app.post("/api/render")
 def api_render(req: RenderRequest):
     try:
+        # Range Render Pre-processing
+        range_start = req.range_start
+        range_end = req.range_end
+        original_duration = req.slots[-1].end_time if req.slots else 0.0
+        
+        if range_start is not None or range_end is not None:
+            r_start = range_start if range_start is not None else 0.0
+            r_end = range_end if (range_end is not None and range_end > 0) else original_duration
+            
+            if r_start < 0: r_start = 0.0
+            if r_end > original_duration: r_end = original_duration
+            
+            if r_end > r_start:
+                range_duration = r_end - r_start
+                
+                # 1. Filter and shift slots
+                new_slots = []
+                for slot in req.slots:
+                    if slot.end_time > r_start and slot.start_time < r_end:
+                        new_start = max(0.0, slot.start_time - r_start)
+                        new_end = min(range_duration, slot.end_time - r_start)
+                        
+                        shift_offset = 0.0
+                        if slot.start_time < r_start:
+                            shift_offset = r_start - slot.start_time
+                            
+                        new_clip_start = slot.clip_start + shift_offset
+                        new_clip_duration = new_end - new_start
+                        
+                        new_slots.append(TimelineSlot(
+                            start_time=new_start,
+                            end_time=new_end,
+                            video_path=slot.video_path,
+                            clip_start=new_clip_start,
+                            clip_duration=new_clip_duration,
+                            keep_audio=slot.keep_audio,
+                            transcript=slot.transcript,
+                            speaker=slot.speaker
+                        ))
+                req.slots = new_slots
+                
+                # 2. Filter and shift lyrics
+                if req.lyrics:
+                    new_lyrics = []
+                    for lyric in req.lyrics:
+                        l_start = lyric.get("start", 0.0)
+                        l_end = lyric.get("end", 0.0)
+                        if l_end > r_start and l_start < r_end:
+                            new_l_start = max(0.0, l_start - r_start)
+                            new_l_end = min(range_duration, l_end - r_start)
+                            new_lyric = lyric.copy()
+                            new_lyric["start"] = new_l_start
+                            new_lyric["end"] = new_l_end
+                            new_lyrics.append(new_lyric)
+                    req.lyrics = new_lyrics
+                
+                # 3. Crop audio using FFmpeg
+                import hashlib
+                audio_cache_key = f"{req.audio_path}_{r_start}_{range_duration}"
+                audio_hash = hashlib.md5(audio_cache_key.encode("utf-8")).hexdigest()
+                os.makedirs("data/trimmed_cache", exist_ok=True)
+                cropped_audio_path = os.path.abspath(f"data/trimmed_cache/audio_{audio_hash}{os.path.splitext(req.audio_path)[1]}")
+                
+                if not os.path.exists(cropped_audio_path):
+                    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+                    crop_cmd = [
+                        ffmpeg, "-y",
+                        "-ss", str(r_start),
+                        "-t", str(range_duration),
+                        "-i", req.audio_path,
+                        "-c:a", "copy",
+                        cropped_audio_path
+                    ]
+                    print(f"Cropping BGM audio: {' '.join(crop_cmd)}")
+                    subprocess.run(crop_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                req.audio_path = cropped_audio_path
+
         # Save render decision list data to hyperframes template directory
         # Translate local audio path to absolute/web path
         abs_audio = os.path.abspath(req.audio_path)
         
         # Prepare slots for HyperFrames rendering
-        # Clean up old temp videos in hyperframes_template (if any remain)
+        # Clean up old temp videos that exceed the current request's slot count
+        num_slots = len(req.slots)
         for f in os.listdir("hyperframes_template"):
             if f.startswith("temp_video_") and f.endswith(".mp4"):
                 try:
-                    os.remove(os.path.join("hyperframes_template", f))
-                except OSError:
+                    idx = int(f.replace("temp_video_", "").replace(".mp4", ""))
+                    if idx >= num_slots:
+                        os.remove(os.path.join("hyperframes_template", f))
+                except (ValueError, OSError):
                     pass
                     
         # Prepare slots using relative paths relative to hyperframes_template/
         # Prepare slots and hard links inside hyperframes_template/
         slots_data = []
-        video_to_temp_name = {}
-        
-        for slot in req.slots:
+        for slot_idx, slot in enumerate(req.slots):
             abs_video_path = os.path.abspath(slot.video_path)
             resolved_path = abs_video_path
             
@@ -981,29 +1129,81 @@ def api_render(req: RenderRequest):
                 resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
                 print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
             
-            # Create hard link in hyperframes_template
-            if resolved_path not in video_to_temp_name:
-                temp_name = f"temp_video_{len(video_to_temp_name)}.mp4"
-                temp_path = os.path.join("hyperframes_template", temp_name)
+            import hashlib
+            slot_duration = slot.end_time - slot.start_time
+            
+            # Construct a unique cache key based on video path, clip start, and duration
+            cache_key_str = f"{resolved_path}_{slot.clip_start}_{slot_duration}"
+            cache_hash = hashlib.md5(cache_key_str.encode("utf-8")).hexdigest()
+            cache_dir = os.path.abspath("data/trimmed_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{cache_hash}.mp4")
+            
+            # Create a unique trimmed video in hyperframes_template for each slot
+            temp_name = f"temp_video_{slot_idx}.mp4"
+            temp_path = os.path.join("hyperframes_template", temp_name)
+            
+            use_cached = False
+            if os.path.exists(cache_path):
+                try:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    os.link(cache_path, temp_path)
+                    use_cached = True
+                    print(f"Reused cached trim for slot {slot_idx}: {cache_path}")
+                except Exception:
+                    try:
+                        shutil.copy2(cache_path, temp_path)
+                        use_cached = True
+                        print(f"Copied cached trim for slot {slot_idx}: {cache_path}")
+                    except Exception as ce:
+                        print(f"Failed to reuse cache for slot {slot_idx}: {ce}")
+            
+            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+            clip_start_val = 0.0
+            clip_dur_val = slot_duration
+            
+            if not use_cached:
                 if os.path.exists(temp_path):
                     try:
                         os.remove(temp_path)
                     except OSError:
                         pass
-                try:
-                    os.link(resolved_path, temp_path)
-                except Exception as link_err:
-                    # Fallback to copy if hard link fails (e.g. cross-device)
-                    print(f"Hard link failed: {link_err}. Falling back to copy...")
-                    shutil.copy2(resolved_path, temp_path)
-                video_to_temp_name[resolved_path] = temp_name
+                
+                # Trim the video segment directly without any padding or delay
+                trim_cmd = [
+                    ffmpeg, "-y",
+                    "-ss", str(slot.clip_start),
+                    "-t", str(slot_duration),
+                    "-i", resolved_path,
+                    "-c:v", "libx264", "-crf", "18", "-preset", "ultrafast",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "192k",
+                    temp_path
+                ]
+                
+                print(f"Trimming slot {slot_idx}: {resolved_path} from {slot.clip_start}s to {slot.clip_start + slot_duration}s...")
+                trim_res = subprocess.run(trim_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                if trim_res.returncode == 0:
+                    try:
+                        shutil.copy2(temp_path, cache_path)
+                    except Exception as ce:
+                        print(f"Failed to save to cache: {ce}")
+                else:
+                    print(f"  Trim failed: {trim_res.stderr.decode()[:200]}. Falling back to link/copy...")
+                    try:
+                        os.link(resolved_path, temp_path)
+                    except Exception:
+                        shutil.copy2(resolved_path, temp_path)
+                    clip_start_val = slot.clip_start
+                    clip_dur_val = slot.clip_duration
                 
             slots_data.append({
                 "startTime": slot.start_time,
                 "endTime": slot.end_time,
-                "videoPath": video_to_temp_name[resolved_path],
-                "clipStart": slot.clip_start,
-                "clipDuration": slot.clip_duration,
+                "videoPath": temp_name,
+                "clipStart": clip_start_val,
+                "clipDuration": clip_dur_val,
                 "keepAudio": slot.keep_audio,
                 "transcript": slot.transcript,
                 "speaker": slot.speaker
@@ -1035,10 +1235,11 @@ def api_render(req: RenderRequest):
             
             # Generate static video elements HTML
             video_tags = []
+            dialogue_vol = req.dialogue_volume if req.dialogue_volume is not None else 1.0
             for i, slot in enumerate(slots_data):
                 slot_duration = slot["endTime"] - slot["startTime"]
                 # Omit 'muted' and set volume if this slot keeps audio so HyperFrames extracts its audio track
-                audio_attr = 'volume="0.8"' if slot.get("keepAudio") else 'muted'
+                audio_attr = f'volume="{dialogue_vol}"' if slot.get("keepAudio") else 'muted'
                 video_tags.append(
                     f'<video class="video-layer" id="video_{i}" src="{slot["videoPath"]}" data-start="{slot["startTime"]}" data-duration="{slot_duration}" preload="auto" {audio_attr}></video>'
                 )
@@ -1047,13 +1248,14 @@ def api_render(req: RenderRequest):
             with open("hyperframes_template/index.template.html", "r", encoding="utf-8") as f:
                 html_content = f.read()
                 
-            # Replace audio src
+            # Replace audio src and data-volume attributes
+            music_vol = req.music_volume if req.music_volume is not None else 1.0
             html_content = re.sub(
-                r'<audio id="bg-audio" src="[^"]*"',
-                f'<audio id="bg-audio" src="{audio_filename}"',
+                r'<audio id="bg-audio" src="[^"]*"[^>]*>',
+                f'<audio id="bg-audio" src="{audio_filename}" data-start="0" data-duration="{duration_val}" data-track-index="0" data-volume="{music_vol}"></audio>',
                 html_content
             )
-            # Replace data-duration on both viewport and audio tags
+            # Replace data-duration on viewport tag
             html_content = re.sub(
                 r'data-duration="[^"]*"',
                 f'data-duration="{duration_val}"',
@@ -1087,7 +1289,10 @@ def api_render(req: RenderRequest):
             "npx", "hyperframes", "render", template_path,
             "-o", output_mp4,
             "--data", data_path,
-            "--resolution", "landscape"
+            "--resolution", "landscape",
+            "--low-memory-mode",
+            "--no-browser-gpu",
+            "--workers", "1"
         ]
         
         print(f"Executing render command: {' '.join(cmd)}")
@@ -1095,6 +1300,8 @@ def api_render(req: RenderRequest):
         env = os.environ.copy()
         local_node_bin = os.path.abspath("node/bin")
         env["PATH"] = local_node_bin + os.pathsep + env.get("PATH", "")
+        # Enable HyperFrames frame extraction cache
+        env["HYPERFRAMES_EXTRACT_CACHE_DIR"] = os.path.expanduser("~/.cache/hyperframes/extracted_frames")
         
         # Run render command
         process = subprocess.Popen(
@@ -1340,6 +1547,66 @@ if os.path.exists("frontend"):
 
 # Serve rendering templates folder statically
 app.mount("/hyperframes_template", StaticFiles(directory="hyperframes_template"), name="hyperframes_template")
+
+@app.post("/api/save_setup")
+def api_save_setup(req: RenderRequest):
+    try:
+        os.makedirs("data/setups", exist_ok=True)
+        name = req.setup_name if req.setup_name else "default"
+        # Sanitize setup name to only allow safe alphanumeric, spaces, chinese characters, underscores, and dashes
+        import re
+        name = re.sub(r'[^\w\s\u4e00-\u9fa5\-]', '', name).strip()
+        if not name:
+            name = "default"
+            
+        setup_path = f"data/setups/{name}.json"
+        with open(setup_path, "w", encoding="utf-8") as f:
+            json.dump(req.dict(), f, indent=2)
+        return {"status": "success", "message": f"微调配置 '{name}' 保存成功"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/list_setups")
+def api_list_setups():
+    setups_dir = "data/setups"
+    if not os.path.exists(setups_dir):
+        return []
+    try:
+        files = []
+        for f in os.listdir(setups_dir):
+            if f.endswith(".json"):
+                full_path = os.path.join(setups_dir, f)
+                stat = os.stat(full_path)
+                import datetime
+                mtime = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                files.append({
+                    "name": f.replace(".json", ""),
+                    "mtime": mtime
+                })
+        # Sort by mtime descending (newest first)
+        files.sort(key=lambda x: x["mtime"], reverse=True)
+        return files
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/load_setup")
+def api_load_setup(name: Optional[str] = "default"):
+    import re
+    name = re.sub(r'[^\w\s\u4e00-\u9fa5\-]', '', name).strip() if name else "default"
+    setup_path = f"data/setups/{name}.json"
+    
+    # Backward compatibility: Fallback to old default path if specific doesn't exist but default does
+    if name == "default" and not os.path.exists(setup_path) and os.path.exists("data/v_tiao_setup.json"):
+        setup_path = "data/v_tiao_setup.json"
+        
+    if not os.path.exists(setup_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"未找到微调配置: {name}"})
+    try:
+        with open(setup_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

@@ -163,7 +163,12 @@ Available Video Segments in our library:
 Please analyze the storyboard visual prompt (and any accompanying lyrics/narrative context) and find the top 5 video segments that are the most contextually, narratively, and visually appropriate.
 Pay special attention to:
 1. Matching characters (e.g. Sasaki, Tayama, Yamada), actions, emotions, and settings between the visual prompt and the segment summaries/styles.
-2. Evaluating character dialogue/voiceover: if the segment has a non-empty "transcript" field, check if the dialogue content and its emotional resonance match our storytelling narrative concept, song lyric, and emotional tone. Prioritize segments where dialogue transcripts narratively support, mirror, or complement the storyboard's theme (e.g. mutual support, rescue, connection) over mundane daily banter.
+2. CRITICAL DIALOGUE & TRANSCRIPT ALIGNMENT: If a segment has a non-empty "transcript" (dialogue), you MUST carefully evaluate its semantic alignment with the storyboard's narrative concept and song lyric.
+   - We want the character's spoken dialogue to match the story of this section or the meaning of the lyrics as closely as possible.
+   - For example, if the narrative concept involves "mutual support" or "healing", prioritize segments where the transcript shows characters speaking lines of comfort, care, or connection.
+   - If the song lyric expresses a specific sentiment (e.g. "I want to see you", "don't leave", "thank you"), prioritize segments where the transcript has matching dialogue (e.g. expressing a desire to meet, asking someone to stay, or saying thanks).
+   - If the dialogue transcript perfectly mirrors or complements the narrative/lyrics, rank it at the top of the candidates, even if the visual background description isn't a 100% exact match, because matching spoken lines to the song's story creates a far more powerful and cinematic AMV/MAD.
+   - Avoid daily trivia or unrelated banter transcripts unless they specifically fit the section's narrative.
 3. When multiple segments are visually/semantically similar, prefer segments with a higher mad_score (higher = more visually engaging material).
 4. If the visual prompt calls for a calm, wide, or transitional shot (e.g. sky, landscape, opening scene), it is acceptable to select atmospheric (scene_type=atmospheric) segments even with lower mad_scores.
 
@@ -438,7 +443,12 @@ Storyboards to match (with lyrics, narrative context, and emotional tones):
 Please analyze each storyboard visual prompt and find the top 5 video segments that are the most contextually, narratively, and visually appropriate for it.
 Pay special attention to:
 1. Matching characters (e.g. Sasaki, Tayama, Yamada), actions, emotions, and settings between the visual prompt and the segment summaries/styles.
-2. Evaluating character dialogue/voiceover: if a segment has a non-empty "transcript" field, check if the dialogue content and its emotional resonance match the storyboard's narrative concept, song lyric, and emotional tone. Prioritize segments where dialogue transcripts narratively support, mirror, or complement the storyboard's theme (e.g. mutual support, rescue, connection) over mundane daily banter.
+2. CRITICAL DIALOGUE & TRANSCRIPT ALIGNMENT: If a segment has a non-empty "transcript" (dialogue), you MUST carefully evaluate its semantic alignment with the storyboard's narrative concept and song lyric.
+   - We want the character's spoken dialogue to match the story of this section or the meaning of the lyrics as closely as possible.
+   - For example, if the narrative concept involves "mutual support" or "healing", prioritize segments where the transcript shows characters speaking lines of comfort, care, or connection.
+   - If the song lyric expresses a specific sentiment (e.g. "I want to see you", "don't leave", "thank you"), prioritize segments where the transcript has matching dialogue (e.g. expressing a desire to meet, asking someone to stay, or saying thanks).
+   - If the dialogue transcript perfectly mirrors or complements the narrative/lyrics, rank it at the top of the candidates, even if the visual background description isn't a 100% exact match, because matching spoken lines to the song's story creates a far more powerful and cinematic AMV/MAD.
+   - Avoid daily trivia or unrelated banter transcripts unless they specifically fit the section's narrative.
 3. When multiple segments are visually/semantically similar, prefer segments with a higher mad_score (higher = more visually engaging material).
 4. If a storyboard calls for a calm, wide, or transitional shot, it is acceptable to select atmospheric (scene_type=atmospheric) segments even with lower mad_scores.
 

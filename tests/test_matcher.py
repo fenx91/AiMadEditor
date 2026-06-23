@@ -141,6 +141,6 @@ def test_find_candidates_with_narrative_context(mock_connect, mock_call_gemini):
     assert "Song Lyric (Text): \"Tired night\"" in prompt_sent
     assert "Narrative Concept/Storytelling Goal: \"Show Sasaki walking in the rain\"" in prompt_sent
     assert "Emotional Tone: \"melancholy\"" in prompt_sent
-    assert "Evaluating character dialogue/voiceover" in prompt_sent
+    assert "CRITICAL DIALOGUE & TRANSCRIPT ALIGNMENT" in prompt_sent
 
 

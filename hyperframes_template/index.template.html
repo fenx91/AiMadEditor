@@ -5,6 +5,7 @@
     <title>HyperFrames Render Template</title>
     <!-- GSAP for animations if needed -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;700&display=swap" rel="stylesheet">
     <style>
         body, html {
             margin: 0;
@@ -32,8 +33,7 @@
             top: 0;
             left: 0;
             object-fit: cover;
-            opacity: 0;
-            z-index: 1;
+            display: block;
         }
 
         /* Overlay captions/watermark for style */
@@ -64,9 +64,10 @@
 <div id="viewport" data-composition-id="mv" data-width="1920" data-height="1080" data-start="0" data-duration="10.44">
     <!-- VIDEO_ELEMENTS_PLACEHOLDER -->
     <!-- Double Subtitles Overlay -->
-    <div id="dialogue-container" style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 42px; font-weight: 700; font-family: 'Inter', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif; text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
-    <div id="lyrics-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 34px; font-weight: 500; font-family: 'Inter', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif; text-shadow: 0 0 8px rgba(0,0,0,0.95), 0 0 3px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
+    <div id="dialogue-container" style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 42px; font-weight: 700; font-family: 'Inter', 'Noto Sans SC', sans-serif; text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
+    <div id="lyrics-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 34px; font-weight: 500; font-family: 'Inter', 'Noto Sans SC', sans-serif; text-shadow: 0 0 8px rgba(0,0,0,0.95), 0 0 3px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
 </div>
+
 <audio id="bg-audio" src="audio.mp3" data-start="0" data-duration="10.44" data-track-index="0" data-volume="1"></audio>
 
 <div id="hud">
@@ -75,6 +76,9 @@
 </div>
 
 <script>
+    // Force HyperFrames screenshot mode for video playback compatibility
+    if (false) { requestAnimationFrame(); }
+
     let renderData = null;
     let videoElements = [];
     let isPlaying = false;
@@ -94,9 +98,12 @@
         }
     }
 
+    const isRendering = navigator.userAgent.includes("Headless");
+
     function initTemplate() {
         const viewport = document.getElementById('viewport');
         videoElements = [];
+        currentShowingIndex = -1;
         
         // Set metadata attributes for HyperFrames renderer compatibility
         viewport.setAttribute('data-composition-id', 'mv');
@@ -106,36 +113,55 @@
         
         // Register composition timeline
         window.__timelines = window.__timelines || {};
-        window.__timelines['mv'] = {
-            seek: function(time) {
-                return window.seekTo(time);
-            }
-        };
+        if (isRendering) {
+            // Register a native GSAP timeline for HyperFrames capture engine to seek.
+            // This allows the HyperFrames frame-by-frame renderer to automatically
+            // map and inject video frames based on data-start and data-duration.
+            const tl = gsap.timeline({ paused: true });
+            tl.set({}, {}, renderData.duration || 10);
+            tl.eventCallback("onUpdate", function() {
+                updateTimeline(tl.time());
+            });
+            window.__timelines['mv'] = tl;
+        } else {
+            // Register custom seek adapter for browser preview
+            window.__timelines['mv'] = {
+                seek: function(time) {
+                    return window.seekTo(time);
+                }
+            };
+        }
         
         // Setup Audio if present (for real-time browser preview)
         if (renderData.audioPath) {
             audio = document.getElementById('bg-audio');
-            // Load audio via endpoint or local file copy
-            // The app.py copies the audio as audio.mp3 / audio.wav into the template folder
-            // Let's search for the copied audio
             const ext = renderData.audioPath.split('.').pop();
             audio.src = 'audio.' + ext;
             audio.load();
             audio.volume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
         }
 
-        // Retrieve static Video Elements from DOM
+        // Retrieve static Video Elements from DOM (from viewport container)
         videoElements = Array.from(viewport.querySelectorAll('video'));
-        videoElements.forEach(video => {
-            video.load();
+        videoElements.forEach((video, index) => {
+            if (isRendering) {
+                // In headless render, let HyperFrames engine handle styles
+                video.load();
+            } else {
+                // In browser preview, initial state is zIndex = 1, hidden
+                video.style.zIndex = '1';
+                video.style.display = 'none';
+                video.load();
+            }
         });
 
         // Show HUD if debugging or if run in non-headless browser
-        if (!navigator.userAgent.includes("Headless")) {
+        if (!isRendering) {
             document.getElementById('hud').style.display = 'block';
             setupKeyboardControls();
         }
-        // Expose a function for HyperFrames frame-by-frame rendering
+        
+        // Expose seekTo function
         window.seekTo = function(time) {
             globalTime = time;
             return updateTimeline(time);
@@ -154,11 +180,9 @@
         if (!renderData) return Promise.resolve();
         
         const activeIndex = getActiveSlotIndex(time);
-        const isRendering = navigator.userAgent.includes("Headless");
         console.log(`[updateTimeline] time=${time.toFixed(3)} isRendering=${isRendering} activeIndex=${activeIndex}`);
         
         document.getElementById('hud-time').textContent = time.toFixed(2) + 's';
-        let seekPromise = Promise.resolve();
         
         // Update BGM lyrics overlay dynamically
         const lyricsDiv = document.getElementById('lyrics-container');
@@ -177,12 +201,12 @@
         }
         
         if (activeIndex !== -1) {
-            const activeVideo = videoElements[activeIndex];
             const slot = renderData.slots[activeIndex];
-            const clipTime = slot.clipStart + (time - slot.startTime);
+            const activeVideo = videoElements[activeIndex];
             
             // Show clip name in HUD
             const filename = slot.videoPath.split(/[/\\]/).pop();
+            const clipTime = time - slot.startTime; // relative offset since we don't pad anymore
             document.getElementById('hud-clip').textContent = `CLIP: ${filename} (at ${clipTime.toFixed(2)}s)`;
             
             // Update dialogue subtitles overlay dynamically
@@ -208,68 +232,50 @@
                 }
             }
             
-            // Handle raw video audio mix in
-            if (slot.keepAudio) {
-                activeVideo.muted = false;
-                activeVideo.volume = renderData.dialogueVolume !== undefined ? renderData.dialogueVolume : 1.0;
-            } else {
-                activeVideo.muted = true;
-            }
-            if (audio) {
-                audio.volume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
-            }
-            
-            // Sync current time of video
-            const isRendering = navigator.userAgent.includes("Headless");
-            const timeDiff = Math.abs(activeVideo.currentTime - clipTime);
-            
-            // Control playback
-            if (isPlaying || isRendering) {
-                if (activeVideo.paused) activeVideo.play().catch(e => {});
-            } else {
-                if (!activeVideo.paused) activeVideo.pause();
-            }
-            
+            const targetMusicVolume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
+            const targetDialogueVolume = renderData.dialogueVolume !== undefined ? renderData.dialogueVolume : 1.0;
+
             if (isRendering) {
-                // In headless rendering, to prevent deadlock/hang caused by frozen browser clock,
-                // we DO NOT wait for the 'seeked' event via a promise.
-                // Instead, we ensure the video is playing naturally, and we only manually seek
-                // (currentTime = clipTime) when there is a significant sync difference (> 0.1s).
-                if (timeDiff > 0.1) {
-                    activeVideo.currentTime = clipTime;
-                }
-                showActiveVideo(activeIndex);
-                seekPromise = Promise.resolve();
-            } else if ((isPlaying && timeDiff > 0.1) || (!isPlaying && timeDiff > 0.01)) {
-                // Clean up any pending seek listener on this video
-                if (activeVideo._seekCleanup) {
-                    activeVideo._seekCleanup();
-                }
-                
-                seekPromise = new Promise((resolve) => {
-                    const onSeeked = () => {
-                        activeVideo.removeEventListener('seeked', onSeeked);
-                        activeVideo._seekCleanup = null;
-                        showActiveVideo(activeIndex);
-                        resolve();
-                    };
-                    activeVideo.addEventListener('seeked', onSeeked);
-                    activeVideo._seekCleanup = () => {
-                        activeVideo.removeEventListener('seeked', onSeeked);
-                        resolve();
-                    };
-                    activeVideo.currentTime = clipTime;
-                });
+              // Headless render: Let HyperFrames own video playback, visibility, and frame injection.
+              // Just sync audio volumes to let the capture engine extract/mix them correctly.
+              if (slot.keepAudio) {
+                activeVideo.muted = false;
+                activeVideo.volume = targetDialogueVolume;
+              } else {
+                activeVideo.muted = true;
+              }
             } else {
-                showActiveVideo(activeIndex);
+              // Browser preview mode: Manually switch active video and sync currentTime
+              showActiveVideo(activeIndex);
+              
+              if (slot.keepAudio) {
+                activeVideo.muted = false;
+                activeVideo.volume = targetDialogueVolume;
+              } else {
+                activeVideo.muted = true;
+              }
+              
+              // Sync current time of active video
+              const duration = activeVideo.duration;
+              if (!isNaN(duration) && duration > 0) {
+                const timeDiff = Math.abs(activeVideo.currentTime - clipTime);
+                if (timeDiff > 0.45) {
+                  activeVideo.currentTime = clipTime;
+                }
+              }
+            }
+            
+            if (audio) {
+              audio.volume = targetMusicVolume;
             }
         } else {
-            // Hide all videos if outside slots
-            videoElements.forEach(v => {
-                v.style.opacity = '0';
-                v.style.zIndex = '1';
-                if (!v.paused) v.pause();
-            });
+            // Outside slots
+            if (!isRendering) {
+                videoElements.forEach(v => {
+                    v.style.display = 'none';
+                    if (!v.paused) v.pause();
+                });
+            }
             currentShowingIndex = -1;
             
             // Hide dialogue when outside slots
@@ -284,7 +290,7 @@
             }
         }
         
-        return seekPromise;
+        return Promise.resolve();
     }
 
     function showActiveVideo(activeIndex) {
@@ -292,11 +298,13 @@
         
         videoElements.forEach((video, index) => {
             if (index === activeIndex) {
-                video.style.opacity = '1';
-                video.style.zIndex = '2';
+                video.style.display = 'block';
+                video.style.zIndex = '10';
+                if (isPlaying) {
+                    video.play().catch(e => {});
+                }
             } else {
-                // If it is not the active index, hide it and pause
-                video.style.opacity = '0';
+                video.style.display = 'none';
                 video.style.zIndex = '1';
                 if (!video.paused) video.pause();
                 video.muted = true; // Ensure inactive videos are muted

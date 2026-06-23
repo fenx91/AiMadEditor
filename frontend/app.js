@@ -26,6 +26,8 @@ let allIndexedVideos = [];
 let musicVolume = 0.8;
 let dialogueVolume = 0.8;
 let isMuted = false;
+let isTrimmerPlaying = false;
+let trimmerPlayTimeUpdateHandler = null;
 let lastPreviewSlotIndex = null;
 let activePlayer = null;
 let preloadPlayer = null;
@@ -69,11 +71,13 @@ const el = {
     timeDisplay: document.getElementById('time-display'),
     bpmDisplay: document.getElementById('bpm-display'),
     waveformCanvas: document.getElementById('waveform-canvas'),
+    dialogueWaveformCanvas: document.getElementById('dialogue-waveform-canvas'),
     timelineRuler: document.getElementById('timeline-ruler'),
     playhead: document.getElementById('playhead'),
     
     lyricTrackItems: document.getElementById('lyric-track-items'),
     videoTrackItems: document.getElementById('video-track-items'),
+    dialogueTrackItems: document.getElementById('dialogue-track-items'),
     
     activeLyricText: document.getElementById('active-lyric-text'),
     activeLyricMeta: document.getElementById('active-lyric-meta'),
@@ -87,6 +91,12 @@ const el = {
     estimatedDuration: document.getElementById('estimated-duration'),
     renderBtn: document.getElementById('render-btn'),
     exportXmlBtn: document.getElementById('export-xml-btn'),
+    exportJsonBtn: document.getElementById('export-json-btn'),
+    rangeRenderEnable: document.getElementById('range-render-enable'),
+    rangeRenderStart: document.getElementById('range-render-start'),
+    rangeRenderEnd: document.getElementById('range-render-end'),
+    saveSetupBtn: document.getElementById('save-setup-btn'),
+    loadSetupBtn: document.getElementById('load-setup-btn'),
     
     modalOverlay: document.getElementById('modal-overlay'),
     modalTitle: document.getElementById('modal-title'),
@@ -103,6 +113,7 @@ const el = {
     
     // New Trimmer Controls
     trimmerInput: document.getElementById('trimmer-input'),
+    trimmerPlayBtn: document.getElementById('trimmer-play-btn'),
     trimBtnSub1s: document.getElementById('trim-btn-sub-1s'),
     trimBtnSub01s: document.getElementById('trim-btn-sub-01s'),
     trimBtnAdd01s: document.getElementById('trim-btn-add-01s'),
@@ -117,8 +128,12 @@ const el = {
     // Tabbed Script Planner Controls
     tabPlannerBtn: document.getElementById('tab-planner-btn'),
     tabMatcherBtn: document.getElementById('tab-matcher-btn'),
+    tabJsonBtn: document.getElementById('tab-json-btn'),
     panelPlannerContent: document.getElementById('panel-planner-content'),
     panelMatcherContent: document.getElementById('panel-matcher-content'),
+    panelJsonContent: document.getElementById('panel-json-content'),
+    jsonEditorTextarea: document.getElementById('json-editor-textarea'),
+    applyJsonEditBtn: document.getElementById('apply-json-edit-btn'),
     userVisionInput: document.getElementById('user-vision-input'),
     generateScriptBtn: document.getElementById('generate-script-btn'),
     regenerateScriptBtn: document.getElementById('regenerate-script-btn'),
@@ -149,8 +164,30 @@ const el = {
     browserTranscriptList: document.getElementById('browser-transcript-list')
 };
 
+// Collapsible panels initialization in the right sidebar
+function initCollapsiblePanels() {
+    const headers = document.querySelectorAll('.collapsible-header');
+    headers.forEach(header => {
+        header.addEventListener('click', () => {
+            const targetId = header.getAttribute('data-target');
+            const target = document.getElementById(targetId);
+            if (!target) return;
+            
+            const isExpanded = target.classList.contains('expanded');
+            if (isExpanded) {
+                target.classList.remove('expanded');
+                header.classList.remove('active');
+            } else {
+                target.classList.add('expanded');
+                header.classList.add('active');
+            }
+        });
+    });
+}
+
 // Check backend status and fetch video pool on startup
 async function init() {
+    initCollapsiblePanels();
     try {
         const res = await fetch('/api/videos');
         if (res.ok) {
@@ -183,8 +220,6 @@ function updateVolume() {
     const targetMusicVolume = isMuted ? 0 : musicVolume;
     const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
     
-    audioEl.volume = targetMusicVolume;
-    
     // Dynamically sync active preview player's volume and muted state based on keep_audio status
     if (activePlayer) {
         let shouldKeepAudio = false;
@@ -193,24 +228,29 @@ function updateVolume() {
             if (songData) {
                 const activeIndex = songData.lyrics.findIndex(l => curr >= l.start && curr < l.end);
                 const effective = activeIndex !== -1 ? getEffectiveSlot(activeIndex) : null;
-                if (effective && !effective.isFallback && effective.keep_audio) {
+                if (effective && effective.keep_audio) {
                     shouldKeepAudio = true;
                 }
             }
         } else {
-            if (activeSlotIndex !== null && timelineSlots[activeSlotIndex]) {
-                if (timelineSlots[activeSlotIndex].keep_audio) {
+            if (activeSlotIndex !== null) {
+                const effective = getEffectiveSlot(activeSlotIndex);
+                if (effective && effective.keep_audio) {
                     shouldKeepAudio = true;
                 }
             }
         }
         
         if (shouldKeepAudio && !isMuted) {
+            audioEl.volume = targetMusicVolume;
             activePlayer.muted = false;
             activePlayer.volume = targetDialogueVolume;
         } else {
+            audioEl.volume = targetMusicVolume;
             activePlayer.muted = true;
         }
+    } else {
+        audioEl.volume = targetMusicVolume;
     }
     if (preloadPlayer) preloadPlayer.muted = true;
     
@@ -264,7 +304,10 @@ function getEffectiveSlot(index) {
                 clip_duration: duration,
                 video_duration: baseSlot.video_duration,
                 isFallback: true,
-                fallbackFromIndex: j
+                fallbackFromIndex: j,
+                keep_audio: baseSlot.keep_audio,
+                transcript: baseSlot.transcript,
+                speaker: baseSlot.speaker
             };
         }
     }
@@ -280,7 +323,10 @@ function getEffectiveSlot(index) {
             clip_duration: currentLyric.end - currentLyric.start,
             video_duration: firstFilled.video_duration,
             isFallback: true,
-            fallbackFromIndex: timelineSlots.indexOf(firstFilled)
+            fallbackFromIndex: timelineSlots.indexOf(firstFilled),
+            keep_audio: firstFilled.keep_audio,
+            transcript: firstFilled.transcript,
+            speaker: firstFilled.speaker
         };
     }
     return null;
@@ -319,6 +365,22 @@ function refreshTimelineBlocks() {
         if (!block) continue;
         
         const slot = timelineSlots[i];
+        
+        // Update Dialogue track block
+        const dialogueBlock = document.getElementById(`dialogue-track-block-${i}`);
+        if (dialogueBlock) {
+            if (slot && slot.transcript) {
+                dialogueBlock.className = "track-block dialogue-block filled";
+                dialogueBlock.innerHTML = `🎙️ "${slot.transcript}"`;
+            } else {
+                dialogueBlock.className = "track-block dialogue-block empty";
+                dialogueBlock.innerHTML = `<em>无台词</em>`;
+            }
+            if (activeSlotIndex === i) {
+                dialogueBlock.classList.add('active');
+            }
+        }
+        
         if (slot) {
             block.className = "track-block video-block";
             if (activeSlotIndex === i) {
@@ -367,6 +429,12 @@ function refreshTimelineBlocks() {
             }
         }
     }
+    
+    // Auto-update JSON Editor configuration text when timeline refreshed
+    updateJsonEditorForActiveSlot();
+    
+    // Auto-draw dialogue audio tracks visualizer
+    drawDialogueWaveform();
 }
 
 // Setup Event Listeners
@@ -419,6 +487,9 @@ function setupEventListeners() {
     // Render
     el.renderBtn.addEventListener('click', renderVideo);
     el.exportXmlBtn.addEventListener('click', exportPremiereXml);
+    if (el.exportJsonBtn) el.exportJsonBtn.addEventListener('click', exportHyperFramesData);
+    if (el.saveSetupBtn) el.saveSetupBtn.addEventListener('click', () => saveSetup(false));
+    if (el.loadSetupBtn) el.loadSetupBtn.addEventListener('click', () => loadSetup(false));
     
     // Fullscreen on Double Click of Video Container or Players
     const toggleFullscreen = () => {
@@ -472,6 +543,36 @@ function setupEventListeners() {
             updateGlobalPreview(audioEl.currentTime);
         }
     });
+    
+    if (el.dialogueWaveformCanvas) {
+        el.dialogueWaveformCanvas.addEventListener('click', (e) => {
+            if (!songData) return;
+            const rect = el.dialogueWaveformCanvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const pixelsPerSecond = 20;
+            const targetTime = clickX / pixelsPerSecond;
+            
+            // Find and select corresponding slot when clicking dialogue waveform track
+            let clickedIndex = null;
+            for (let i = 0; i < songData.lyrics.length; i++) {
+                const lyric = songData.lyrics[i];
+                if (targetTime >= lyric.start && targetTime <= lyric.end) {
+                    clickedIndex = i;
+                    break;
+                }
+            }
+            if (clickedIndex !== null) {
+                selectSlot(clickedIndex);
+            }
+            
+            audioEl.currentTime = Math.max(0, Math.min(songData.duration, targetTime));
+            updatePlayheadPosition();
+            
+            if (!isPlaying) {
+                updateGlobalPreview(audioEl.currentTime);
+            }
+        });
+    }
     
     // Modals
     el.modalCloseBtn.addEventListener('click', () => {
@@ -595,6 +696,7 @@ function setupEventListeners() {
     if (el.trimBtnSub01s) el.trimBtnSub01s.addEventListener('click', () => adjustTrimmerTime(-0.1));
     if (el.trimBtnAdd01s) el.trimBtnAdd01s.addEventListener('click', () => adjustTrimmerTime(0.1));
     if (el.trimBtnAdd1s) el.trimBtnAdd1s.addEventListener('click', () => adjustTrimmerTime(1.0));
+    if (el.trimmerPlayBtn) el.trimmerPlayBtn.addEventListener('click', toggleTrimmerPlay);
     
     // Manual Video Selection & Timestamping
     if (el.manualVideoSelect) {
@@ -670,9 +772,13 @@ function setupEventListeners() {
     }
     
     // Tab switching event listeners
-    if (el.tabPlannerBtn && el.tabMatcherBtn) {
+    if (el.tabPlannerBtn && el.tabMatcherBtn && el.tabJsonBtn) {
         el.tabPlannerBtn.addEventListener('click', () => switchTab('planner'));
         el.tabMatcherBtn.addEventListener('click', () => switchTab('matcher'));
+        el.tabJsonBtn.addEventListener('click', () => switchTab('json'));
+    }
+    if (el.applyJsonEditBtn) {
+        el.applyJsonEditBtn.addEventListener('click', applyJsonEdit);
     }
     
     // Generate script plan
@@ -862,6 +968,9 @@ async function processMusic() {
             // Fetch AI story vision recommendations based on lyrics and DB video content
             fetchStoryVisionRecommendations();
             
+            // Auto-load cached script plan outline
+            loadScriptPlanCacheSilently();
+            
             // Setup Trimmer UI
             el.audioTrimmerCard.style.display = 'block';
             el.audioTrimStart.value = 0;
@@ -953,6 +1062,9 @@ async function trimMusic() {
             if (el.generateScriptBtn) el.generateScriptBtn.removeAttribute('disabled');
             if (el.regenerateScriptBtn) el.regenerateScriptBtn.removeAttribute('disabled');
             
+            // Auto-load cached script plan outline
+            loadScriptPlanCacheSilently();
+            
             setTimeout(() => {
                 el.modalOverlay.style.display = 'none';
             }, 1000);
@@ -988,6 +1100,9 @@ function drawWaveform() {
     document.getElementById('timeline-ruler').style.width = `${totalWidth}px`;
     document.getElementById('lyric-track-items').style.width = `${totalWidth}px`;
     document.getElementById('video-track-items').style.width = `${totalWidth}px`;
+    if (document.getElementById('dialogue-track-items')) {
+        document.getElementById('dialogue-track-items').style.width = `${totalWidth}px`;
+    }
     
     const w = canvas.width;
     const h = canvas.height;
@@ -1047,6 +1162,96 @@ function drawWaveform() {
         label.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         ruler.appendChild(label);
     }
+    
+    // Draw dialogue tracks initially
+    drawDialogueWaveform();
+}
+
+// Draw dialogue audio track segments (only where transcript is present)
+function drawDialogueWaveform() {
+    if (!songData || !el.dialogueWaveformCanvas) return;
+    
+    const canvas = el.dialogueWaveformCanvas;
+    const ctx = canvas.getContext('2d');
+    
+    // Sync canvas width to song waveform width
+    const totalWidth = el.waveformCanvas.width;
+    canvas.width = totalWidth;
+    canvas.style.width = `${totalWidth}px`;
+    
+    const w = canvas.width;
+    const h = canvas.height;
+    
+    ctx.clearRect(0, 0, w, h);
+    
+    // Draw grid matching the background song track
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < w; x += 50) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+    }
+    
+    const pixelsPerSecond = 20;
+    
+    // Loop through slots and draw simulated waveforms for segments with transcript
+    for (let i = 0; i < songData.lyrics.length; i++) {
+        const slot = timelineSlots[i];
+        if (slot && slot.transcript) {
+            const lyric = songData.lyrics[i];
+            const startX = lyric.start * pixelsPerSecond;
+            const endX = lyric.end * pixelsPerSecond;
+            const width = endX - startX;
+            
+            if (width <= 0) continue;
+            
+            if (slot.keep_audio) {
+                // Bright Amber (Mixed)
+                ctx.fillStyle = 'rgba(255, 170, 0, 0.08)';
+                ctx.fillRect(startX, 0, width, h);
+                ctx.strokeStyle = 'rgba(255, 170, 0, 0.25)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(startX, 0, width, h);
+                ctx.fillStyle = 'rgba(255, 170, 0, 0.7)';
+            } else {
+                // Muted Teal (Dialogue present but not mixed)
+                ctx.fillStyle = 'rgba(0, 242, 254, 0.02)';
+                ctx.fillRect(startX, 0, width, h);
+                ctx.strokeStyle = 'rgba(0, 242, 254, 0.15)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(startX, 0, width, h);
+                ctx.fillStyle = 'rgba(0, 242, 254, 0.4)';
+            }
+            
+            // Draw simulated dialogue signal waveform (deterministic pseudorandom)
+            const barW = 2;
+            const gap = 1;
+            const step = barW + gap;
+            
+            for (let x = startX + 2; x < endX - 2; x += step) {
+                const val = (Math.sin(x * 0.35) * 0.45 + Math.cos(x * 0.12) * 0.25 + 0.3);
+                const barH = Math.max(2, val * (h - 8));
+                const y = (h - barH) / 2;
+                ctx.fillRect(x, y, barW, barH);
+            }
+            
+            // Draw text label with speaker name and dialogue snippet
+            const speaker = detectSpeaker(slot.video_name || '', slot.transcript || '');
+            const cleanName = slot.video_name ? slot.video_name.replace(/\.\w+$/, '') : 'vocal';
+            const displayName = cleanName.length > 15 ? cleanName.substring(0, 15) + '...' : cleanName;
+            
+            let label = `🎙️ [${speaker.toUpperCase()}] ${displayName}`;
+            if (slot.keep_audio) {
+                label = `🔊 ` + label;
+            }
+            
+            ctx.fillStyle = slot.keep_audio ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.45)';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.fillText(label, startX + 6, 12);
+        }
+    }
 }
 
 // Playhead sync
@@ -1067,6 +1272,9 @@ function togglePlayback() {
             updateGlobalPreview(audioEl.currentTime);
         }
     } else {
+        if (isTrimmerPlaying) {
+            stopTrimmerPlay();
+        }
         audioEl.play();
         el.playBtn.textContent = "⏸";
         isPlaying = true;
@@ -1150,21 +1358,22 @@ function updateGlobalPreview(curr) {
         // Ensure active player has target source loaded and is visible
         switchActivePlayer(effective.proxy_url, effective.clip_start);
         
-        // Sync unmuting based on keep_audio
+        // Sync unmuting based on keep_audio with volume normalization
         const targetMusicVolume = isMuted ? 0 : musicVolume;
         const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
-        if (effective.keep_audio && !effective.isFallback && !isMuted) {
+        if (effective.keep_audio && !isMuted) {
             activePlayer.muted = false;
             activePlayer.volume = targetDialogueVolume;
+            audioEl.volume = targetMusicVolume;
         } else {
             activePlayer.muted = true;
+            audioEl.volume = targetMusicVolume;
         }
-        audioEl.volume = targetMusicVolume; // Keep BGM volume constant
         
         // 2. Update Monitor Dialogue Subtitle Overlay (Top/Middle)
         const monitorDialogue = document.getElementById('monitor-dialogue-overlay');
         if (monitorDialogue) {
-            if (effective.keep_audio && !effective.isFallback && effective.transcript) {
+            if (effective.keep_audio && effective.transcript) {
                 monitorDialogue.textContent = effective.transcript;
                 monitorDialogue.style.display = 'block';
                 
@@ -1194,7 +1403,8 @@ function updateGlobalPreview(curr) {
                 activePlayer.currentTime = clipTime;
             } else {
                 const timeDiff = Math.abs(activePlayer.currentTime - clipTime);
-                if (timeDiff > 1.0 || activeIndex !== lastPreviewSlotIndex) {
+                // Only seek if sync drift is significant (e.g. > 450ms) to ensure smooth seamless playback for continuous clips
+                if (timeDiff > 0.45) {
                     activePlayer.currentTime = clipTime;
                 }
             }
@@ -1268,6 +1478,7 @@ function renderLyricsList(lyrics) {
 function renderTimelineTracks(lyrics) {
     el.lyricTrackItems.innerHTML = '';
     el.videoTrackItems.innerHTML = '';
+    if (el.dialogueTrackItems) el.dialogueTrackItems.innerHTML = '';
     
     const pixelsPerSecond = 20;
     
@@ -1295,6 +1506,19 @@ function renderTimelineTracks(lyrics) {
         videoBlock.id = `video-track-block-${index}`;
         videoBlock.addEventListener('click', () => selectSlot(index));
         el.videoTrackItems.appendChild(videoBlock);
+        
+        // Dialogue/transcript track block
+        if (el.dialogueTrackItems) {
+            const dialogueBlock = document.createElement('div');
+            dialogueBlock.className = 'track-block dialogue-block empty';
+            dialogueBlock.style.left = `${left}px`;
+            dialogueBlock.style.width = `${width}px`;
+            dialogueBlock.innerHTML = `<em>无台词</em>`;
+            dialogueBlock.setAttribute('data-index', index);
+            dialogueBlock.id = `dialogue-track-block-${index}`;
+            dialogueBlock.addEventListener('click', () => selectSlot(index));
+            el.dialogueTrackItems.appendChild(dialogueBlock);
+        }
     });
     refreshTimelineBlocks();
 }
@@ -1306,6 +1530,7 @@ function selectSlot(index) {
         document.querySelector(`.lyric-item[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
         document.querySelector(`.lyric-block[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
         document.querySelector(`.video-block[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
+        document.querySelector(`.dialogue-block[data-index="${activeSlotIndex}"]`)?.classList.remove('active');
     }
     
     activeSlotIndex = index;
@@ -1314,6 +1539,7 @@ function selectSlot(index) {
     document.querySelector(`.lyric-item[data-index="${index}"]`)?.classList.add('active');
     document.querySelector(`.lyric-block[data-index="${index}"]`)?.classList.add('active');
     document.querySelector(`.video-block[data-index="${index}"]`)?.classList.add('active');
+    document.querySelector(`.dialogue-block[data-index="${index}"]`)?.classList.add('active');
     
     // Scroll active lyric item into view
     document.querySelector(`.lyric-item[data-index="${index}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1379,10 +1605,16 @@ function selectSlot(index) {
     } else {
         el.clearSlotBtn.style.display = 'none';
     }
+    
+    // Update JSON Editor
+    updateJsonEditorForActiveSlot();
 }
 
 // Update monitor player when slot selected or edited
 function updatePreviewPlayerForSlot(index) {
+    if (isTrimmerPlaying) {
+        stopTrimmerPlay();
+    }
     const slot = timelineSlots[index];
     
     if (slot) {
@@ -1411,7 +1643,7 @@ function updatePreviewPlayerForSlot(index) {
         const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
         if (slot.keep_audio && !isMuted) {
             activePlayer.muted = false;
-            activePlayer.volume = targetDialogueVolume;
+            activePlayer.volume = Math.min(1.0, targetDialogueVolume);
         } else {
             activePlayer.muted = true;
         }
@@ -1473,6 +1705,90 @@ function handleTrimmerChange() {
     
     // Refresh all timeline blocks since a change in start time affects downstream fallbacks
     refreshTimelineBlocks();
+}
+
+function toggleTrimmerPlay() {
+    if (activeSlotIndex === null) return;
+    const slot = timelineSlots[activeSlotIndex];
+    if (!slot || !activePlayer) return;
+
+    if (isTrimmerPlaying) {
+        stopTrimmerPlay();
+    } else {
+        // If main timeline is playing, stop it first
+        if (isPlaying) {
+            togglePlayback();
+        }
+        
+        // Seek to current trimmer value
+        const start = parseFloat(el.trimmerRange.value) || slot.clip_start;
+        activePlayer.currentTime = start;
+        
+        // Setup volume and mute: ALWAYS unmute during trimmer preview so user can hear dialogue/action!
+        activePlayer.muted = false;
+        activePlayer.volume = isMuted ? 0 : Math.min(1.0, dialogueVolume || 0.8);
+        
+        // Define dynamic timeupdate listener
+        trimmerPlayTimeUpdateHandler = () => {
+            const currentSlot = timelineSlots[activeSlotIndex];
+            if (!currentSlot) {
+                stopTrimmerPlay();
+                return;
+            }
+            const endTime = currentSlot.clip_start + currentSlot.clip_duration;
+            if (activePlayer.currentTime >= endTime || activePlayer.currentTime < currentSlot.clip_start) {
+                stopTrimmerPlay();
+            }
+        };
+        
+        activePlayer.addEventListener('timeupdate', trimmerPlayTimeUpdateHandler);
+        
+        // Also listen for manual pause/ended on the video element to restore state
+        activePlayer.addEventListener('pause', onTrimmerVideoPause);
+        activePlayer.addEventListener('ended', onTrimmerVideoPause);
+        
+        activePlayer.play().then(() => {
+            isTrimmerPlaying = true;
+            if (el.trimmerPlayBtn) {
+                el.trimmerPlayBtn.innerHTML = "⏸️ 停止";
+                el.trimmerPlayBtn.style.color = "#ffcc00";
+                el.trimmerPlayBtn.style.borderColor = "rgba(255, 204, 0, 0.3)";
+            }
+        }).catch(err => {
+            console.error("Trimmer player failed to play:", err);
+            stopTrimmerPlay();
+        });
+    }
+}
+
+function onTrimmerVideoPause() {
+    // When video pauses/ends naturally or manually, clean up trimmer play state
+    stopTrimmerPlay();
+}
+
+function stopTrimmerPlay() {
+    if (!activePlayer) return;
+    activePlayer.pause();
+    
+    // Remove listeners
+    if (trimmerPlayTimeUpdateHandler) {
+        activePlayer.removeEventListener('timeupdate', trimmerPlayTimeUpdateHandler);
+        trimmerPlayTimeUpdateHandler = null;
+    }
+    activePlayer.removeEventListener('pause', onTrimmerVideoPause);
+    activePlayer.removeEventListener('ended', onTrimmerVideoPause);
+    
+    // Restore player time to the current start value
+    if (activeSlotIndex !== null && timelineSlots[activeSlotIndex]) {
+        activePlayer.currentTime = timelineSlots[activeSlotIndex].clip_start;
+    }
+    
+    isTrimmerPlaying = false;
+    if (el.trimmerPlayBtn) {
+        el.trimmerPlayBtn.innerHTML = "▶️ 预览";
+        el.trimmerPlayBtn.style.color = "#00f2fe";
+        el.trimmerPlayBtn.style.borderColor = "rgba(0, 242, 254, 0.3)";
+    }
 }
 
 // 3. AI Matches Query
@@ -1672,9 +1988,8 @@ function assignCandidateToActiveSlot(cand) {
     const duration = lyric.end - lyric.start;
     const fileName = cand.video_path.split('/').pop();
     
-    // Place video such that the detected keyframe is near the start
-    // clip_start starts at keyframe timestamp, but make sure we don't exceed video duration
-    const clip_start = Math.max(0, cand.timestamp);
+    // If the segment has dialogue/transcript, align clip start to the beginning of the segment/dialogue
+    const clip_start = (cand.segment && cand.segment.transcript) ? Math.max(0, cand.segment.start_time) : Math.max(0, cand.timestamp);
     
     const transcript = (cand.segment && cand.segment.transcript) ? cand.segment.transcript : "";
     let keep_audio = false;
@@ -1732,9 +2047,11 @@ function updateFooterStats() {
     if (filledCount > 0) {
         el.renderBtn.removeAttribute('disabled');
         el.exportXmlBtn.removeAttribute('disabled');
+        if (el.exportJsonBtn) el.exportJsonBtn.removeAttribute('disabled');
     } else {
         el.renderBtn.setAttribute('disabled', 'true');
         el.exportXmlBtn.setAttribute('disabled', 'true');
+        if (el.exportJsonBtn) el.exportJsonBtn.setAttribute('disabled', 'true');
     }
 }
 
@@ -1894,7 +2211,8 @@ async function autoMatchAllSlots() {
                     
                     const duration = lyric.end - lyric.start;
                     const fileName = selectedCand.video_path.split('/').pop();
-                    const clip_start = Math.max(0, selectedCand.timestamp);
+                    // Align clip start to segment start if there is a dialogue transcript
+                    const clip_start = (selectedCand.segment && selectedCand.segment.transcript) ? Math.max(0, selectedCand.segment.start_time) : Math.max(0, selectedCand.timestamp);
                     
                     const transcript = (selectedCand.segment && selectedCand.segment.transcript) ? selectedCand.segment.transcript : "";
                     let keep_audio = false;
@@ -1985,6 +2303,9 @@ async function renderVideo() {
     if (timelineSlots.filter(s => s !== null).length === 0) return;
     if (!songData) return;
     
+    // Auto-save current configuration quietly before triggering render
+    await saveSetup(true);
+    
     // Build JSON data payload
     // Filter only filled slots or fill empty slots with a placeholder loop
     const slotsPayload = [];
@@ -2000,9 +2321,9 @@ async function renderVideo() {
                 video_path: effective.video_path,
                 clip_start: effective.clip_start,
                 clip_duration: lyric.end - lyric.start,
-                keep_audio: effective.isFallback ? false : (effective.keep_audio || false),
-                transcript: effective.isFallback ? "" : (effective.transcript || ""),
-                speaker: effective.isFallback ? "unknown" : detectSpeaker(effective.video_name || "", effective.transcript || "")
+                keep_audio: effective.keep_audio || false,
+                transcript: effective.transcript || "",
+                speaker: effective.speaker || "unknown"
             });
         }
     }
@@ -2014,6 +2335,19 @@ async function renderVideo() {
     
     updateModalProgress(30, "正在生成 HyperFrames HTML 模板...");
     
+    let rangeStartVal = null;
+    let rangeEndVal = null;
+    if (el.rangeRenderEnable && el.rangeRenderEnable.checked) {
+        const startText = el.rangeRenderStart.value;
+        const endText = el.rangeRenderEnd.value;
+        if (startText !== "") {
+            rangeStartVal = parseFloat(startText);
+        }
+        if (endText !== "") {
+            rangeEndVal = parseFloat(endText);
+        }
+    }
+
     try {
         const res = await fetch('/api/render', {
             method: 'POST',
@@ -2023,7 +2357,9 @@ async function renderVideo() {
                 audio_path: songData.audio_path,
                 lyrics: songData.lyrics,
                 music_volume: musicVolume,
-                dialogue_volume: dialogueVolume
+                dialogue_volume: dialogueVolume,
+                range_start: rangeStartVal,
+                range_end: rangeEndVal
             })
         });
         
@@ -2071,9 +2407,9 @@ async function exportPremiereXml() {
                 video_path: effective.video_path,
                 clip_start: effective.clip_start,
                 clip_duration: lyric.end - lyric.start,
-                keep_audio: effective.isFallback ? false : (effective.keep_audio || false),
-                transcript: effective.isFallback ? "" : (effective.transcript || ""),
-                speaker: effective.isFallback ? "unknown" : detectSpeaker(effective.video_name || "", effective.transcript || "")
+                keep_audio: effective.keep_audio || false,
+                transcript: effective.transcript || "",
+                speaker: effective.speaker || "unknown"
             });
         }
     }
@@ -2124,6 +2460,341 @@ async function exportPremiereXml() {
         updateModalProgress(100, "网络异常！");
         appendModalLog(`通信异常: ${e.message}`);
         el.modalFooter.style.display = 'block';
+    }
+}
+
+function exportHyperFramesData() {
+    if (timelineSlots.filter(s => s !== null).length === 0) return;
+    if (!songData) return;
+    
+    let rangeStartVal = null;
+    let rangeEndVal = null;
+    if (el.rangeRenderEnable && el.rangeRenderEnable.checked) {
+        const startText = el.rangeRenderStart.value;
+        const endText = el.rangeRenderEnd.value;
+        if (startText !== "") {
+            rangeStartVal = parseFloat(startText);
+        }
+        if (endText !== "") {
+            rangeEndVal = parseFloat(endText);
+        }
+    }
+
+    const slotsPayload = [];
+    for (let i = 0; i < songData.lyrics.length; i++) {
+        const lyric = songData.lyrics[i];
+        const effective = getEffectiveSlot(i);
+        
+        if (effective) {
+            slotsPayload.push({
+                startTime: lyric.start,
+                endTime: lyric.end,
+                videoPath: effective.video_path,
+                clipStart: effective.clip_start,
+                clipDuration: lyric.end - lyric.start,
+                keepAudio: effective.keep_audio || false,
+                transcript: effective.transcript || "",
+                speaker: effective.speaker || "unknown"
+            });
+        }
+    }
+    
+    const renderData = {
+        rangeStart: rangeStartVal,
+        rangeEnd: rangeEndVal,
+        slots: slotsPayload,
+        audioPath: songData.audio_path,
+        lyrics: songData.lyrics,
+        musicVolume: musicVolume,
+        dialogueVolume: dialogueVolume,
+        duration: songData.lyrics[songData.lyrics.length - 1].end
+    };
+    
+    const jsonString = JSON.stringify(renderData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'render_data.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// Save current timeline and volume config to backend
+async function saveSetup(isSilent = false) {
+    if (timelineSlots.filter(s => s !== null).length === 0) {
+        if (!isSilent) {
+            showModal("💾 保存微调配置", "当前没有微调过的槽位，无需保存！");
+            el.modalFooter.style.display = 'block';
+        }
+        return;
+    }
+    if (!songData) return;
+
+    let targetName = "default";
+    if (!isSilent) {
+        const defaultName = "微调版本_" + new Date().toLocaleTimeString('zh-CN', { hour12: false }).replace(/:/g, '-');
+        const userInput = prompt("请输入另存为的配置版本名称：", defaultName);
+        if (userInput === null) return; // User cancelled
+        const sanitized = userInput.trim();
+        if (!sanitized) {
+            alert("配置名称不能为空！");
+            return;
+        }
+        targetName = sanitized;
+    }
+    
+    if (!isSilent) {
+        showModal("💾 保存微调配置", `正在构建微调配置 [${targetName}]...`);
+        appendModalLog(`收集时间轴卡点与音轨状态数据...`);
+    }
+    
+    const slotsPayload = [];
+    for (let i = 0; i < songData.lyrics.length; i++) {
+        const lyric = songData.lyrics[i];
+        const effective = getEffectiveSlot(i);
+        if (effective) {
+            slotsPayload.push({
+                start_time: lyric.start,
+                end_time: lyric.end,
+                video_path: effective.video_path,
+                clip_start: effective.clip_start,
+                clip_duration: lyric.end - lyric.start,
+                keep_audio: effective.keep_audio || false,
+                transcript: effective.transcript || "",
+                speaker: effective.speaker || "unknown"
+            });
+        }
+    }
+    
+    let rangeStartVal = null;
+    let rangeEndVal = null;
+    if (el.rangeRenderEnable && el.rangeRenderEnable.checked) {
+        const startText = el.rangeRenderStart.value;
+        const endText = el.rangeRenderEnd.value;
+        if (startText !== "") rangeStartVal = parseFloat(startText);
+        if (endText !== "") rangeEndVal = parseFloat(endText);
+    }
+    
+    const payload = {
+        slots: slotsPayload,
+        audio_path: songData.audio_path,
+        lyrics: songData.lyrics,
+        music_volume: musicVolume,
+        dialogue_volume: dialogueVolume,
+        range_start: rangeStartVal,
+        range_end: rangeEndVal,
+        setup_name: targetName
+    };
+    
+    if (!isSilent) {
+        updateModalProgress(50, "正在同步配置到后端服务器...");
+        appendModalLog(`发送 POST 请求至 /api/save_setup...`);
+    }
+    
+    try {
+        const res = await fetch('/api/save_setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+            if (!isSilent) {
+                updateModalProgress(100, "保存成功！");
+                appendModalLog(`微调配置已另存为: data/setups/${targetName}.json`);
+                el.modalFooter.style.display = 'block';
+            }
+        } else {
+            if (!isSilent) {
+                updateModalProgress(100, "保存发生异常！");
+                appendModalLog(`异常详情: ${data.detail || '未知错误'}`);
+                el.modalFooter.style.display = 'block';
+            }
+        }
+    } catch(e) {
+        console.error("Save setup error:", e);
+        if (!isSilent) {
+            updateModalProgress(100, "网络连接异常！");
+            appendModalLog("无法连接后端 API 服务，请确认服务已正常运行。");
+            el.modalFooter.style.display = 'block';
+        }
+    }
+}
+
+// Load previously saved timeline setup from backend
+async function loadSetup(isSilent = false, setupName = "default") {
+    if (!songData) {
+        if (!isSilent) {
+            showModal("📂 读取微调配置", "请先等待基础音乐数据加载完成！");
+            el.modalFooter.style.display = 'block';
+        }
+        return;
+    }
+    
+    // Manual setup version selection triggers
+    if (!isSilent && setupName === "default") {
+        showModal("📂 选择读取的微调版本", "正在拉取历史存盘列表...");
+        appendModalLog("发送 GET 请求至 /api/list_setups...");
+        try {
+            const listRes = await fetch('/api/list_setups');
+            if (!listRes.ok) {
+                updateModalProgress(100, "拉取列表失败！");
+                el.modalFooter.style.display = 'block';
+                return;
+            }
+            const setups = await listRes.json();
+            if (setups.length === 0) {
+                updateModalProgress(100, "暂无已保存的配置");
+                appendModalLog("您还未保存过任何微调，请先进行微调后点击 💾 保存微调。");
+                el.modalFooter.style.display = 'block';
+                return;
+            }
+            
+            // Render version select list dynamically inside modal console box
+            updateModalProgress(50, "请选择要读取的版本：");
+            el.modalLogConsole.innerHTML = '';
+            
+            setups.forEach(setup => {
+                const item = document.createElement('div');
+                item.className = 'setup-version-item';
+                item.style.cssText = "cursor: pointer; padding: 12px; margin-bottom: 8px; border-radius: 6px; background: rgba(0,242,254,0.06); border: 1px solid rgba(0,242,254,0.15); display: flex; justify-content: space-between; align-items: center; transition: all 0.2s; font-family: sans-serif;";
+                
+                // Add hover style
+                item.addEventListener('mouseenter', () => {
+                    item.style.background = 'rgba(0,242,254,0.12)';
+                    item.style.borderColor = 'rgba(0,242,254,0.4)';
+                });
+                item.addEventListener('mouseleave', () => {
+                    item.style.background = 'rgba(0,242,254,0.06)';
+                    item.style.borderColor = 'rgba(0,242,254,0.15)';
+                });
+                
+                item.innerHTML = `
+                    <span style="font-weight: bold; color: #00f2fe; font-size: 13px;">${setup.name}</span>
+                    <span style="color: rgba(255,255,255,0.4); font-size: 11px;">⏱️ 修改: ${setup.mtime}</span>
+                `;
+                
+                // Clicking a setup item triggers the actual load
+                item.addEventListener('click', async () => {
+                    showModal("📂 读取微调配置", `正在读取版本: ${setup.name}...`);
+                    appendModalLog(`开始加载微调版本 [${setup.name}]`);
+                    await loadSetup(false, setup.name);
+                });
+                
+                el.modalLogConsole.appendChild(item);
+            });
+            
+            el.modalFooter.style.display = 'block';
+            return;
+        } catch(e) {
+            console.error("List setups error:", e);
+            updateModalProgress(100, "读取版本列表失败！");
+            appendModalLog("无法连接服务器获取微调历史列表。");
+            el.modalFooter.style.display = 'block';
+            return;
+        }
+    }
+    
+    // Actual load execution
+    if (!isSilent) {
+        showModal("📂 读取微调配置", `正在拉取微调配置 [${setupName}]...`);
+        appendModalLog(`发送 GET 请求至 /api/load_setup?name=${encodeURIComponent(setupName)}...`);
+    }
+    
+    try {
+        const res = await fetch(`/api/load_setup?name=${encodeURIComponent(setupName)}`);
+        if (!res.ok) {
+            if (!isSilent) {
+                const err = await res.json();
+                updateModalProgress(100, `未发现微调版本 [${setupName}]`);
+                appendModalLog(`服务器返回: ${err.message || '配置可能被删除'}`);
+                el.modalFooter.style.display = 'block';
+            }
+            return;
+        }
+        
+        const data = await res.json();
+        if (!data.slots || data.slots.length === 0) {
+            if (!isSilent) {
+                updateModalProgress(100, "读取空配置！");
+                appendModalLog("配置中无有效卡点槽位。");
+                el.modalFooter.style.display = 'block';
+            }
+            return;
+        }
+        
+        if (!isSilent) {
+            updateModalProgress(50, "微调数据拉取成功，正在解析还原时间轴...");
+            appendModalLog(`已获取到 ${data.slots.length} 个历史微调槽位。`);
+        }
+        
+        // Restore musicVolume & dialogueVolume
+        if (data.music_volume !== undefined) {
+            musicVolume = data.music_volume;
+            if (el.musicVolumeSlider) el.musicVolumeSlider.value = musicVolume;
+        }
+        if (data.dialogue_volume !== undefined) {
+            dialogueVolume = data.dialogue_volume;
+            if (el.dialogueVolumeSlider) el.dialogueVolumeSlider.value = dialogueVolume;
+        }
+        updateVolume();
+        
+        // Restore Range Render settings
+        if (data.range_start !== undefined && data.range_start !== null) {
+            if (el.rangeRenderStart) el.rangeRenderStart.value = data.range_start;
+            if (el.rangeRenderEnable) el.rangeRenderEnable.checked = true;
+        } else {
+            if (el.rangeRenderEnable) el.rangeRenderEnable.checked = false;
+        }
+        if (data.range_end !== undefined && data.range_end !== null) {
+            if (el.rangeRenderEnd) el.rangeRenderEnd.value = data.range_end;
+        }
+        
+        // Match saved slots back to songData.lyrics
+        let restoredCount = 0;
+        data.slots.forEach(slot => {
+            const idx = songData.lyrics.findIndex(l => Math.abs(l.start - slot.start_time) < 0.01);
+            if (idx !== -1) {
+                const matchedVideo = allIndexedVideos.find(v => v.original_path === slot.video_path);
+                timelineSlots[idx] = {
+                    video_path: slot.video_path,
+                    video_name: slot.video_path.split(/[/\\]/).pop(),
+                    proxy_url: matchedVideo ? matchedVideo.proxy_url : `/api/video_file?path=${encodeURIComponent(slot.video_path)}`,
+                    clip_start: slot.clip_start,
+                    clip_duration: slot.clip_duration,
+                    video_duration: matchedVideo ? matchedVideo.duration : slot.clip_duration + 5.0,
+                    transcript: slot.transcript,
+                    keep_audio: slot.keep_audio,
+                    frame_url: matchedVideo ? `/data/keyframes/${matchedVideo.original_path.split(/[/\\]/).pop().replace(/\.\w+$/, '')}_kf.jpg` : ''
+                };
+                restoredCount++;
+            }
+        });
+        
+        // Update UI
+        refreshTimelineBlocks();
+        renderScriptOutline();
+        updateFooterStats();
+        
+        if (!isSilent) {
+            updateModalProgress(100, "读取成功！");
+            appendModalLog(`\n--- 微调数据还原完毕 ---`);
+            appendModalLog(`成功匹配并写入: ${restoredCount} / ${data.slots.length} 个卡点分镜`);
+            appendModalLog(`音量参数与范围渲染选项已同步至面板。`);
+            el.modalFooter.style.display = 'block';
+        } else {
+            console.log(`[AutoLoad] Successfully restored ${restoredCount} slots from last setup.`);
+        }
+    } catch(e) {
+        console.error("Load setup error:", e);
+        if (!isSilent) {
+            updateModalProgress(100, "读取失败！");
+            appendModalLog("无法连接后端接口，请确认服务是否正常启动。");
+            el.modalFooter.style.display = 'block';
+        }
     }
 }
 
@@ -2330,6 +3001,21 @@ async function preloadTestData() {
             el.audioName.textContent = "Adam Lambert - Whataya Want from Me_H.mp3 (已预载)";
             el.lyricName.textContent = "Adam Lambert - Whataya Want from Me_H.lrc (已预载)";
             console.log("Test data preloaded successfully!");
+            // Auto-load last saved V-Tiao micro-adjust configuration (load the latest setup)
+            try {
+                const listRes = await fetch('/api/list_setups');
+                if (listRes.ok) {
+                    const setups = await listRes.json();
+                    if (setups && setups.length > 0) {
+                        await loadSetup(true, setups[0].name);
+                    }
+                }
+            } catch (e) {
+                console.warn("Auto-load last setup failed:", e);
+            }
+            
+            // Auto-load cached script plan outline
+            await loadScriptPlanCacheSilently();
         } else {
             console.warn("Failed to preload test data");
             el.audioName.textContent = "未选择文件";
@@ -2345,32 +3031,158 @@ async function preloadTestData() {
 // --- Tab Switching and Script Planner Logic ---
 
 function switchTab(tabName) {
-    if (!el.tabPlannerBtn || !el.tabMatcherBtn || !el.panelPlannerContent || !el.panelMatcherContent) return;
+    if (!el.tabPlannerBtn || !el.tabMatcherBtn || !el.tabJsonBtn || !el.panelPlannerContent || !el.panelMatcherContent || !el.panelJsonContent) return;
     
+    // Deactivate all first
+    el.tabPlannerBtn.classList.remove('active');
+    el.tabPlannerBtn.style.borderBottomColor = 'transparent';
+    el.tabPlannerBtn.style.color = 'var(--text-secondary)';
+    el.tabPlannerBtn.style.fontWeight = '500';
+    
+    el.tabMatcherBtn.classList.remove('active');
+    el.tabMatcherBtn.style.borderBottomColor = 'transparent';
+    el.tabMatcherBtn.style.color = 'var(--text-secondary)';
+    el.tabMatcherBtn.style.fontWeight = '500';
+    
+    el.tabJsonBtn.classList.remove('active');
+    el.tabJsonBtn.style.borderBottomColor = 'transparent';
+    el.tabJsonBtn.style.color = 'var(--text-secondary)';
+    el.tabJsonBtn.style.fontWeight = '500';
+    
+    el.panelPlannerContent.style.display = 'none';
+    el.panelMatcherContent.style.display = 'none';
+    el.panelJsonContent.style.display = 'none';
+    
+    // Activate current
     if (tabName === 'planner') {
         el.tabPlannerBtn.classList.add('active');
         el.tabPlannerBtn.style.borderBottomColor = 'var(--color-primary)';
         el.tabPlannerBtn.style.color = '#fff';
-        
-        el.tabMatcherBtn.classList.remove('active');
-        el.tabMatcherBtn.style.borderBottomColor = 'transparent';
-        el.tabMatcherBtn.style.color = 'var(--text-secondary)';
-        
+        el.tabPlannerBtn.style.fontWeight = '600';
         el.panelPlannerContent.style.display = 'flex';
-        el.panelMatcherContent.style.display = 'none';
-    } else {
+    } else if (tabName === 'matcher') {
         el.tabMatcherBtn.classList.add('active');
         el.tabMatcherBtn.style.borderBottomColor = 'var(--color-primary)';
         el.tabMatcherBtn.style.color = '#fff';
-        
-        el.tabPlannerBtn.classList.remove('active');
-        el.tabPlannerBtn.style.borderBottomColor = 'transparent';
-        el.tabPlannerBtn.style.color = 'var(--text-secondary)';
-        
+        el.tabMatcherBtn.style.fontWeight = '600';
         el.panelMatcherContent.style.display = 'flex';
-        el.panelPlannerContent.style.display = 'none';
+    } else if (tabName === 'json') {
+        el.tabJsonBtn.classList.add('active');
+        el.tabJsonBtn.style.borderBottomColor = 'var(--color-primary)';
+        el.tabJsonBtn.style.color = '#fff';
+        el.tabJsonBtn.style.fontWeight = '600';
+        el.panelJsonContent.style.display = 'flex';
+        // Force update JSON view immediately when switching to it
+        updateJsonEditorForActiveSlot();
     }
 }
+
+// Populates JSON textarea with active slot configuration
+function updateJsonEditorForActiveSlot() {
+    if (!el.jsonEditorTextarea) return;
+    if (activeSlotIndex === null || !songData) {
+        el.jsonEditorTextarea.value = "";
+        el.applyJsonEditBtn?.setAttribute('disabled', 'true');
+        return;
+    }
+    
+    const slot = timelineSlots[activeSlotIndex];
+    if (slot) {
+        el.jsonEditorTextarea.value = JSON.stringify(slot, null, 2);
+    } else {
+        const lyric = songData.lyrics[activeSlotIndex];
+        const dur = lyric.end - lyric.start;
+        const template = {
+            video_path: "",
+            video_name: "",
+            proxy_url: "",
+            clip_start: 0.0,
+            clip_duration: parseFloat(dur.toFixed(2)),
+            video_duration: 0.0,
+            transcript: "",
+            keep_audio: false,
+            frame_url: ""
+        };
+        el.jsonEditorTextarea.value = JSON.stringify(template, null, 2);
+    }
+    el.applyJsonEditBtn?.removeAttribute('disabled');
+}
+
+// Parses JSON input and applies it to current slot
+function applyJsonEdit() {
+    if (activeSlotIndex === null || !songData || !el.jsonEditorTextarea) return;
+    
+    try {
+        const text = el.jsonEditorTextarea.value.trim();
+        if (!text) {
+            alert("JSON 不能为空！");
+            return;
+        }
+        
+        const parsed = JSON.parse(text);
+        
+        // Basic validations
+        if (parsed.video_path === undefined) {
+            alert("错误：JSON 中必须包含 'video_path' 属性！");
+            return;
+        }
+        if (parsed.clip_start === undefined || isNaN(parseFloat(parsed.clip_start))) {
+            alert("错误：JSON 中必须包含数字类型的 'clip_start' 属性！");
+            return;
+        }
+        if (parsed.clip_duration === undefined || isNaN(parseFloat(parsed.clip_duration))) {
+            alert("错误：JSON 中必须包含数字类型的 'clip_duration' 属性！");
+            return;
+        }
+        
+        // Normalize fields
+        if (!parsed.video_name && parsed.video_path) {
+            parsed.video_name = parsed.video_path.split(/[/\\]/).pop();
+        }
+        
+        // Try to automatically find matched proxy_url & duration from allIndexedVideos
+        if ((!parsed.proxy_url || !parsed.video_duration) && parsed.video_path) {
+            const matchedVideo = allIndexedVideos.find(v => v.original_path === parsed.video_path);
+            if (matchedVideo) {
+                if (!parsed.proxy_url) parsed.proxy_url = matchedVideo.proxy_url;
+                if (!parsed.video_duration) parsed.video_duration = matchedVideo.duration;
+                if (!parsed.frame_url) parsed.frame_url = `/data/keyframes/${matchedVideo.original_path.split(/[/\\]/).pop().replace(/\.\w+$/, '')}_kf.jpg`;
+            } else if (!parsed.proxy_url) {
+                parsed.proxy_url = `/api/video_file?path=${encodeURIComponent(parsed.video_path)}`;
+            }
+        }
+        
+        // Save back to timelineSlots
+        timelineSlots[activeSlotIndex] = parsed;
+        
+        // Refresh UI (will trigger refreshTimelineBlocks which triggers updateJsonEditorForActiveSlot)
+        refreshTimelineBlocks();
+        renderScriptOutline();
+        updateFooterStats();
+        
+        // Sync with manual match panel controls
+        if (el.manualVideoSelect) el.manualVideoSelect.value = parsed.video_path;
+        if (el.manualClipStart) el.manualClipStart.value = parseFloat(parsed.clip_start.toFixed(1));
+        
+        // Sync player preview
+        updatePreviewPlayerForSlot(activeSlotIndex);
+        updateGlobalPreview(audioEl.currentTime);
+        
+        browserLog(`JSON Edit applied successfully for slot ${activeSlotIndex}: ${parsed.video_name}`);
+        
+        // Flash border green to indicate success
+        const origBorder = el.jsonEditorTextarea.style.borderColor;
+        el.jsonEditorTextarea.style.borderColor = '#00ff88';
+        setTimeout(() => {
+            el.jsonEditorTextarea.style.borderColor = origBorder;
+        }, 1000);
+        
+    } catch (e) {
+        console.error("JSON parse/apply error:", e);
+        alert("JSON 语法解析错误，请检查括号和逗号是否匹配！\n错误详情: " + e.message);
+    }
+}
+
 
 // Generate script plan outline by querying Gemini
 async function generateScriptPlan(clearCache = false) {
@@ -2382,9 +3194,12 @@ async function generateScriptPlan(clearCache = false) {
     // If clear cache requested, call DELETE first
     if (clearCache) {
         try {
-            await fetch('/api/script_outline_cache', { method: 'DELETE' });
+            await Promise.all([
+                fetch('/api/script_outline_cache', { method: 'DELETE' }),
+                fetch('/api/match_cache', { method: 'DELETE' })
+            ]);
         } catch (e) {
-            console.warn('Failed to clear outline cache:', e);
+            console.warn('Failed to clear caches:', e);
         }
     }
     
@@ -2446,6 +3261,58 @@ async function generateScriptPlan(clearCache = false) {
         updateModalProgress(100, "网络异常！");
         appendModalLog(`连接失败: ${e.message}`);
         el.modalFooter.style.display = 'block';
+    }
+}
+
+// Silently check if there is an existing cached script plan for the current song lyrics, and load it if so
+async function loadScriptPlanCacheSilently() {
+    if (!songData || !songData.lyrics || songData.lyrics.length === 0) return;
+    
+    const lyricsPayload = songData.lyrics.map(l => ({
+        text: l.text,
+        start: l.start,
+        end: l.end
+    }));
+    
+    const defaultVision = "这是一首讲述两个打工人（佐佐木和田山）互相救赎的 AMV/MAD。故事从两人互不认识开始，工作的压力与疲惫让彼此 messed up，但他们 keep coming around，用陪伴和温暖悄悄疗愈对方，最终走向相互依靠。情感基调：从压抑、孤独 → 惊喜相遇 → 暧昧摩擦 → 互相治愈 → 温暖释怀。";
+    const userVision = (el.userVisionInput && el.userVisionInput.value.trim()) ? el.userVisionInput.value.trim() : defaultVision;
+    
+    try {
+        const res = await fetch('/api/get_script_plan_cache', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lyrics: lyricsPayload,
+                user_vision: userVision
+            })
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.script_plan) {
+                console.log("[AutoLoad] Found cached script plan, rendering outline silently.");
+                scriptPlan = data.script_plan;
+                
+                // Render the outline
+                renderScriptOutline();
+                
+                // Update status badge
+                if (el.scriptStatusBadge) {
+                    el.scriptStatusBadge.textContent = "已加载缓存";
+                    el.scriptStatusBadge.style.color = "var(--color-success)";
+                    el.scriptStatusBadge.style.borderColor = "var(--color-success)";
+                }
+                
+                // Show apply button container
+                if (el.applyScriptContainer) {
+                    el.applyScriptContainer.style.display = 'block';
+                }
+            } else {
+                console.log("[AutoLoad] No cached script plan found for current lyrics.");
+            }
+        }
+    } catch (e) {
+        console.warn("[AutoLoad] Failed to fetch script plan cache:", e);
     }
 }
 
@@ -2765,6 +3632,17 @@ async function regenerateScriptLine(index) {
 // Applies script plan & runs bulk auto matcher
 function applyScriptAndMatchAll() {
     if (!scriptPlan) return;
+    
+    const hasFilledSlots = timelineSlots.some(s => s !== null);
+    if (hasFilledSlots) {
+        const confirmClear = confirm("提示：您的时间轴上已存在匹配的素材画面。应用新脚本并一键匹配，是否要清空当前所有卡点的素材，重新进行匹配？\n\n点击【确定】将全部清空并重新匹配；\n点击【取消】将仅对空白未匹配的槽位进行补充匹配。");
+        if (confirmClear) {
+            for (let i = 0; i < timelineSlots.length; i++) {
+                timelineSlots[i] = null;
+            }
+            refreshTimelineBlocks();
+        }
+    }
     
     // Switch to matcher tab
     switchTab('matcher');
