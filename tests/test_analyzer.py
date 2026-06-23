@@ -4,7 +4,7 @@ import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.analyzer import parse_lrc, parse_txt, analyze_audio_rhythm, analyze_music
+from backend.analyzer import parse_lrc, parse_txt, analyze_audio_rhythm, analyze_music, ensure_intro_segment
 
 # ─── 测试数据路径 ────────────────────────────────────────────────────────────────
 DATA_DIR  = os.path.join(os.path.dirname(__file__), "data", "music")
@@ -18,6 +18,29 @@ SAMPLE_LRC = """\
 [00:15.50]Second line of lyrics
 [00:22.10]Third line with millisecond format
 """
+
+
+def test_intro_segment_is_inserted_before_first_timed_lyric():
+    lyrics = [
+        {"start": 10.44, "end": 14.95, "text": "Hey slow it down"},
+        {"start": 14.95, "end": 20.0, "text": "Whataya want from me"},
+    ]
+
+    result = ensure_intro_segment(lyrics)
+
+    assert result[0] == {
+        "start": 0.0,
+        "end": 10.44,
+        "text": "前奏 / Intro",
+        "is_intro": True,
+    }
+    assert result[1:] == lyrics
+
+
+def test_intro_segment_is_not_duplicated_when_timeline_starts_at_zero():
+    lyrics = [{"start": 0.0, "end": 4.0, "text": "First line"}]
+    assert ensure_intro_segment(lyrics) == lyrics
+
 
 # ─── parse_lrc 单元测试 ──────────────────────────────────────────────────────────
 def test_parse_lrc():
@@ -98,7 +121,7 @@ def test_analyze_music_with_lrc():
     assert "lyrics" in result
 
     lyrics = result["lyrics"]
-    assert len(lyrics) == 3, f"应有 3 段歌词，实际 {len(lyrics)}"
+    assert len(lyrics) == 4, f"应有前奏加 3 段歌词，实际 {len(lyrics)}"
 
     # 每段歌词应包含 beats 字段
     for seg in lyrics:

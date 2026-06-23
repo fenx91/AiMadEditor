@@ -313,7 +313,7 @@ def render_video(req: RenderRequest):
         # Let's write output to output/mv_output.mp4
         output_mp4 = os.path.abspath("output/mv_output.mp4")
         
-        # CLI command execution: npx hyperframes render ...
+        # CLI command execution: npx --yes hyperframes@<pinned-version> render ...
         # For security and compatibility, we will prepare the command but not run it blindly.
         # HyperFrames render tool command structure:
         # npx hyperframes render <template_index_html_path> -o <output_mp4> --data <render_data_json_path>
@@ -321,7 +321,7 @@ def render_video(req: RenderRequest):
         data_path = os.path.abspath("hyperframes_template/render_data.json")
         
         cmd = [
-            "npx", "hyperframes", "render", template_path,
+            "npx", "--yes", "hyperframes@0.6.119", "render", template_path,
             "-o", output_mp4,
             "--data", data_path,
             "--resolution", "landscape",
@@ -335,6 +335,11 @@ def render_video(req: RenderRequest):
         env = os.environ.copy()
         local_node_bin = os.path.abspath("node/bin")
         env["PATH"] = local_node_bin + os.pathsep + env.get("PATH", "")
+        # Keep npm/npx non-interactive when FastAPI runs as a background server.
+        env["CI"] = env.get("CI", "1")
+        env["npm_config_yes"] = "true"
+        env["npm_config_fund"] = "false"
+        env["npm_config_audit"] = "false"
         # Enable HyperFrames frame extraction cache
         env["HYPERFRAMES_EXTRACT_CACHE_DIR"] = os.path.expanduser("~/.cache/hyperframes/extracted_frames")
         
