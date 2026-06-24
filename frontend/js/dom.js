@@ -49,6 +49,8 @@ export function getEditorElements() {
     slotSpeakerStatus: document.getElementById('slot-speaker-status'),
     slotDialogueMode: document.getElementById('slot-dialogue-mode'),
     slotDialogueStatus: document.getElementById('slot-dialogue-status'),
+    dialogueAudioSourceRow: document.getElementById('dialogue-audio-source-row'),
+    slotDialogueAudioSource: document.getElementById('slot-dialogue-audio-source'),
     independentDialogueTiming: document.getElementById('independent-dialogue-timing'),
     independentDialogueVideoRow: document.getElementById('independent-dialogue-video-row'),
     slotDialogueVideoSelect: document.getElementById('slot-dialogue-video-select'),

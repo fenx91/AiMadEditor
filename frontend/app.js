@@ -325,7 +325,8 @@ function buildSlotsPayload() {
                     dialogue_clip_start: seg.dialogue_clip_start,
                     dialogue_video_path: seg.dialogue_video_path || null,
                     dialogue_video_name: seg.dialogue_video_name || null,
-                    dialogue_proxy_url: seg.dialogue_proxy_url || null
+                    dialogue_proxy_url: seg.dialogue_proxy_url || null,
+                    use_original_audio: seg.use_original_audio || false
                 });
             });
         } else {
@@ -347,7 +348,8 @@ function buildSlotsPayload() {
                     dialogue_clip_start: effective.dialogue_clip_start,
                     dialogue_video_path: effective.dialogue_video_path || null,
                     dialogue_video_name: effective.dialogue_video_name || null,
-                    dialogue_proxy_url: effective.dialogue_proxy_url || null
+                    dialogue_proxy_url: effective.dialogue_proxy_url || null,
+                    use_original_audio: effective.use_original_audio || false
                 });
             }
         }
@@ -664,6 +666,21 @@ function setupEventListeners() {
             saveSetup(true);
         });
     }
+    if (el.slotDialogueAudioSource) {
+        el.slotDialogueAudioSource.addEventListener('change', (e) => {
+            const val = e.target.value;
+            const segment = activeSlotIndex !== null ? getActiveSegment(activeSlotIndex) : null;
+            if (!segment) return;
+            
+            segment.use_original_audio = (val === 'original');
+            
+            // Re-sync UI & preview player
+            updateIndependentDialogueClips();
+            drawDialogueWaveform();
+            updatePreviewPlayerForSlot(activeSlotIndex);
+            saveSetup(true);
+        });
+    }
 
     const handleDialogueTimingChange = () => {
         const segment = activeSlotIndex !== null ? getActiveSegment(activeSlotIndex) : null;
@@ -691,10 +708,12 @@ function setupEventListeners() {
                 segment.dialogue_video_path = selectedPath;
                 segment.dialogue_video_name = selectedPath.split(/[\/\\]/).pop();
                 segment.dialogue_proxy_url = matchedVideo ? matchedVideo.proxy_url : `/api/video_file?path=${encodeURIComponent(selectedPath)}`;
+                segment.dialogue_original_audio_proxy_url = matchedVideo ? (matchedVideo.original_audio_proxy_url || matchedVideo.proxy_url) : segment.dialogue_proxy_url;
             } else {
                 segment.dialogue_video_path = null;
                 segment.dialogue_video_name = null;
                 segment.dialogue_proxy_url = null;
+                segment.dialogue_original_audio_proxy_url = null;
             }
             
             updateIndependentDialogueClips();
@@ -1477,7 +1496,10 @@ function updateGlobalPreview(curr) {
         el.monitorVideoName.textContent = `[预览模式] ${label}`;
         
         // Ensure active player has target source loaded and is visible
-        switchActivePlayer(effective.proxy_url, effective.clip_start);
+        const effectiveUrl = (effective.use_original_audio && effective.original_audio_proxy_url)
+            ? effective.original_audio_proxy_url
+            : effective.proxy_url;
+        switchActivePlayer(effectiveUrl, effective.clip_start);
         
         // Sync unmuting based on keep_audio with volume normalization
         const targetMusicVolume = isMuted ? 0 : musicVolume;
@@ -1540,8 +1562,16 @@ function updateGlobalPreview(curr) {
         const nextIndex = activeIndex + 1;
         if (nextIndex < songData.lyrics.length) {
             const nextEffective = getEffectiveSlot(nextIndex);
-            if (nextEffective && nextEffective.proxy_url !== effective.proxy_url) {
-                preloadVideo(nextEffective.proxy_url, nextEffective.clip_start);
+            if (nextEffective) {
+                const nextUrl = (nextEffective.use_original_audio && nextEffective.original_audio_proxy_url)
+                    ? nextEffective.original_audio_proxy_url
+                    : nextEffective.proxy_url;
+                const currentUrl = (effective.use_original_audio && effective.original_audio_proxy_url)
+                    ? effective.original_audio_proxy_url
+                    : effective.proxy_url;
+                if (nextUrl !== currentUrl) {
+                    preloadVideo(nextUrl, nextEffective.clip_start);
+                }
             }
         }
         
@@ -1577,7 +1607,9 @@ function updateGlobalPreview(curr) {
     // Sync independent dialogue player
     const activeDialogue = findActiveIndependentDialogue(independentDialogueClips, curr);
     if (activeDialogue) {
-        const resolvedProxyUrl = activeDialogue.proxy_url;
+        const resolvedProxyUrl = (activeDialogue.use_original_audio && activeDialogue.original_audio_proxy_url)
+            ? activeDialogue.original_audio_proxy_url
+            : activeDialogue.proxy_url;
         const currentSrc = independentPlayer.getAttribute('src');
         if (currentSrc !== resolvedProxyUrl) {
             independentPlayer.src = resolvedProxyUrl;
@@ -1768,6 +1800,7 @@ function syncDialogueControls() {
         el.slotDialogueStatus.style.color = 'var(--text-muted)';
         el.independentDialogueTiming.hidden = true;
         if (el.independentDialogueVideoRow) el.independentDialogueVideoRow.hidden = true;
+        if (el.dialogueAudioSourceRow) el.dialogueAudioSourceRow.hidden = true;
         return;
     }
     
@@ -1777,6 +1810,13 @@ function syncDialogueControls() {
     
     const mode = getDialogueMode(segment);
     el.slotDialogueMode.value = mode;
+    
+    if (el.dialogueAudioSourceRow) {
+        el.dialogueAudioSourceRow.hidden = (mode === 'off');
+        if (el.slotDialogueAudioSource) {
+            el.slotDialogueAudioSource.value = segment.use_original_audio ? 'original' : 'vocal';
+        }
+    }
     
     if (mode === 'independent') {
         el.independentDialogueTiming.hidden = false;
@@ -1983,7 +2023,10 @@ function updatePreviewPlayerForSlot(index) {
         }
         
         // Load video proxy in active player
-        switchActivePlayer(slot.proxy_url, slot.clip_start);
+        const slotUrl = (slot.use_original_audio && slot.original_audio_proxy_url)
+            ? slot.original_audio_proxy_url
+            : slot.proxy_url;
+        switchActivePlayer(slotUrl, slot.clip_start);
         
         // Sync unmuting based on keep_audio
         const targetDialogueVolume = isMuted ? 0 : dialogueVolume;
@@ -2006,7 +2049,10 @@ function updatePreviewPlayerForSlot(index) {
             // Hide trimmer panel (can't trim fallback)
             el.clipTrimmer.style.display = 'none';
             
-            switchActivePlayer(effective.proxy_url, effective.clip_start);
+            const effectiveUrl = (effective.use_original_audio && effective.original_audio_proxy_url)
+                ? effective.original_audio_proxy_url
+                : effective.proxy_url;
+            switchActivePlayer(effectiveUrl, effective.clip_start);
             activePlayer.muted = true; // Fallbacks are always muted
             activePlayer.currentTime = effective.clip_start;
             activePlayer.pause();
@@ -2368,6 +2414,8 @@ function assignCandidateToActiveSlot(cand) {
         video_path: cand.video_path,
         video_name: fileName,
         proxy_url: cand.proxy_url,
+        original_audio_proxy_url: cand.original_audio_proxy_url || cand.proxy_url,
+        use_original_audio: false,
         clip_start: clip_start,
         clip_duration: duration,
         video_duration: cand.duration,
@@ -2606,6 +2654,8 @@ async function autoMatchAllSlots() {
                         video_path: selectedCand.video_path,
                         video_name: fileName,
                         proxy_url: selectedCand.proxy_url,
+                        original_audio_proxy_url: selectedCand.original_audio_proxy_url || selectedCand.proxy_url,
+                        use_original_audio: false,
                         clip_start: clip_start,
                         clip_duration: duration,
                         video_duration: selectedCand.duration,
@@ -3072,10 +3122,14 @@ async function loadSetup(isSilent = false, setupName = "default") {
                 const lyric = songData.lyrics[idx];
                 const matchedVideo = allIndexedVideos.find(v => v.original_path === slot.video_path);
                 const dialogueVideo = slot.dialogue_video_path ? allIndexedVideos.find(v => v.original_path === slot.dialogue_video_path) : null;
+                const originalAudioProxyUrl = matchedVideo ? (matchedVideo.original_audio_proxy_url || matchedVideo.proxy_url) : `/api/video_file?path=${encodeURIComponent(slot.video_path)}`;
+                const dialogueOriginalAudioProxyUrl = slot.dialogue_original_audio_proxy_url || (dialogueVideo ? (dialogueVideo.original_audio_proxy_url || dialogueVideo.proxy_url) : (slot.dialogue_video_path ? `/api/video_file?path=${encodeURIComponent(slot.dialogue_video_path)}` : null));
                 const segment = {
                     video_path: slot.video_path,
                     video_name: slot.video_path.split(/[\/\\]/).pop(),
                     proxy_url: matchedVideo ? matchedVideo.proxy_url : `/api/video_file?path=${encodeURIComponent(slot.video_path)}`,
+                    original_audio_proxy_url: originalAudioProxyUrl,
+                    use_original_audio: slot.use_original_audio || false,
                     clip_start: slot.clip_start,
                     clip_duration: slot.end_time - slot.start_time,
                     video_duration: matchedVideo ? matchedVideo.duration : slot.clip_duration + 5.0,
@@ -3092,7 +3146,8 @@ async function loadSetup(isSilent = false, setupName = "default") {
                     dialogue_clip_start: slot.dialogue_clip_start,
                     dialogue_video_path: slot.dialogue_video_path || null,
                     dialogue_video_name: slot.dialogue_video_name || (slot.dialogue_video_path ? slot.dialogue_video_path.split(/[\/\\]/).pop() : null),
-                    dialogue_proxy_url: slot.dialogue_proxy_url || (dialogueVideo ? dialogueVideo.proxy_url : (slot.dialogue_video_path ? `/api/video_file?path=${encodeURIComponent(slot.dialogue_video_path)}` : null))
+                    dialogue_proxy_url: slot.dialogue_proxy_url || (dialogueVideo ? dialogueVideo.proxy_url : (slot.dialogue_video_path ? `/api/video_file?path=${encodeURIComponent(slot.dialogue_video_path)}` : null)),
+                    dialogue_original_audio_proxy_url: dialogueOriginalAudioProxyUrl
                 };
                 if (!timelineSlots[idx]) {
                     timelineSlots[idx] = { ...segment, segments: [segment] };
@@ -3465,6 +3520,8 @@ function updateJsonEditorForActiveSlot() {
             video_path: "",
             video_name: "",
             proxy_url: "",
+            original_audio_proxy_url: "",
+            use_original_audio: false,
             clip_start: 0.0,
             clip_duration: parseFloat(dur.toFixed(2)),
             video_duration: 0.0,
@@ -3512,14 +3569,16 @@ function applyJsonEdit() {
         }
         
         // Try to automatically find matched proxy_url & duration from allIndexedVideos
-        if ((!parsed.proxy_url || !parsed.video_duration) && parsed.video_path) {
+        if ((!parsed.proxy_url || !parsed.video_duration || !parsed.original_audio_proxy_url) && parsed.video_path) {
             const matchedVideo = allIndexedVideos.find(v => v.original_path === parsed.video_path);
             if (matchedVideo) {
                 if (!parsed.proxy_url) parsed.proxy_url = matchedVideo.proxy_url;
+                if (!parsed.original_audio_proxy_url) parsed.original_audio_proxy_url = matchedVideo.original_audio_proxy_url || matchedVideo.proxy_url;
                 if (!parsed.video_duration) parsed.video_duration = matchedVideo.duration;
                 if (!parsed.frame_url) parsed.frame_url = `/data/keyframes/${matchedVideo.original_path.split(/[/\\]/).pop().replace(/\.\w+$/, '')}_kf.jpg`;
-            } else if (!parsed.proxy_url) {
-                parsed.proxy_url = `/api/video_file?path=${encodeURIComponent(parsed.video_path)}`;
+            } else {
+                if (!parsed.proxy_url) parsed.proxy_url = `/api/video_file?path=${encodeURIComponent(parsed.video_path)}`;
+                if (!parsed.original_audio_proxy_url) parsed.original_audio_proxy_url = parsed.proxy_url;
             }
         }
         

@@ -47,6 +47,7 @@ class TimelineSlot(BaseModel):
     dialogue_end_time: Optional[float] = None
     dialogue_clip_start: Optional[float] = None
     dialogue_video_path: Optional[str] = None
+    use_original_audio: Optional[bool] = False
 
 
 class DialogueClip(BaseModel):
@@ -60,6 +61,7 @@ class DialogueClip(BaseModel):
     speaker_manual: Optional[bool] = False
     source_slot_index: Optional[int] = None
     source_segment_index: Optional[int] = None
+    use_original_audio: Optional[bool] = False
 
 
 class TrimRequest(BaseModel):

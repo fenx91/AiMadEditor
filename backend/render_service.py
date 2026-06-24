@@ -169,8 +169,15 @@ def render_video(req: RenderRequest):
             
             # If format is not directly supported in Chrome, map to high-res rendering proxy
             if abs_video_path.lower().endswith(('.mkv', '.avi', '.mov', '.flv')):
-                resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
-                print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
+                use_orig = getattr(slot, 'use_original_audio', False)
+                base_name = os.path.splitext(os.path.basename(abs_video_path))[0]
+                backup_path = os.path.abspath(f"data/proxies_backup_20260623-013023/{base_name}_render.mp4")
+                if use_orig and os.path.exists(backup_path):
+                    resolved_path = backup_path
+                    print(f"Mapped to backup original proxy with full background sound: {resolved_path}")
+                else:
+                    resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
+                    print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
             
             import hashlib
             slot_duration = slot.end_time - slot.start_time
@@ -261,8 +268,15 @@ def render_video(req: RenderRequest):
                 
                 # If format is not directly supported in Chrome, map to high-res rendering proxy
                 if abs_video_path.lower().endswith(('.mkv', '.avi', '.mov', '.flv')):
-                    resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
-                    print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
+                    use_orig = getattr(d_clip, 'use_original_audio', False)
+                    base_name = os.path.splitext(os.path.basename(abs_video_path))[0]
+                    backup_path = os.path.abspath(f"data/proxies_backup_20260623-013023/{base_name}_render.mp4")
+                    if use_orig and os.path.exists(backup_path):
+                        resolved_path = backup_path
+                        print(f"Mapped independent dialogue to backup original proxy: {resolved_path}")
+                    else:
+                        resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
+                        print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
                 
                 import hashlib
                 d_duration = d_clip.end_time - d_clip.start_time

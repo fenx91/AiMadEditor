@@ -6,7 +6,7 @@
     <title>AI MV Script & HyperFrames Studio</title>
     <!-- Google Fonts: Inter & JetBrains Mono -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/style.css?v=29">
+    <link rel="stylesheet" href="/assets/style.css?v=30">
 </head>
 <body>
     <div class="glow-bg"></div>
@@ -318,6 +318,13 @@
                                     </select>
                                     <span id="slot-dialogue-status">先匹配素材</span>
                                 </div>
+                                <div class="slot-control-row" id="dialogue-audio-source-row" style="margin-top: 8px;" hidden>
+                                    <label for="slot-dialogue-audio-source" style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">🎙️ 音频源选择</label>
+                                    <select id="slot-dialogue-audio-source" style="padding: 4px 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; outline: none; max-width: 140px;">
+                                        <option value="vocal">消除背景音(只留语音)</option>
+                                        <option value="original">保留背景杂音(含原片声效)</option>
+                                    </select>
+                                </div>
                                 <div id="independent-dialogue-video-row" style="margin-top: 8px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 8px;" hidden>
                                     <div class="slot-control-row" style="margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
                                         <label for="slot-dialogue-video-select" style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">🎙️ 台词视频源</label>
@@ -580,6 +587,6 @@
         </div>
     </div>
 
-    <script type="module" src="/assets/app.js?v=33"></script>
+    <script type="module" src="/assets/app.js?v=34"></script>
 </body>
 </html>

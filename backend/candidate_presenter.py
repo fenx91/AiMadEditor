@@ -16,6 +16,9 @@ def enrich_candidates(candidates, db_path):
             render_path = os.path.join("data/proxies", f"{base_name}_render.mp4") if base_name else ""
             target_path = render_path if render_path and os.path.exists(render_path) else candidate.get("proxy_path") or original_path
             candidate["proxy_url"] = f"/api/video_file?path={urllib.parse.quote(target_path)}"
+            backup_render_path = os.path.join("data/proxies_backup_20260623-013023", f"{base_name}_render.mp4") if base_name else ""
+            backup_target_path = backup_render_path if backup_render_path and os.path.exists(backup_render_path) else target_path
+            candidate["original_audio_proxy_url"] = f"/api/video_file?path={urllib.parse.quote(backup_target_path)}"
             candidate["frame_url"] = f"/data/keyframes/{os.path.basename(candidate['frame_path'])}"
             cursor.execute("""
                 SELECT start_time, end_time, summary, tags, visual_style,

@@ -119,6 +119,7 @@ def api_get_videos():
             original_path = r[1]
             base_name = os.path.splitext(os.path.basename(original_path))[0] if original_path else ""
             render_path = os.path.join("data/proxies", f"{base_name}_render.mp4") if base_name else ""
+            backup_render_path = os.path.join("data/proxies_backup_20260623-013023", f"{base_name}_render.mp4") if base_name else ""
             
             if render_path and os.path.exists(render_path):
                 target_path = render_path
@@ -126,10 +127,16 @@ def api_get_videos():
                 target_path = r[2] if r[2] else original_path
                 
             proxy_url = f"/api/video_file?path={urllib.parse.quote(target_path)}" if target_path else ""
+            
+            # Use original proxy with full background sound if backup exists
+            backup_target_path = backup_render_path if backup_render_path and os.path.exists(backup_render_path) else target_path
+            backup_proxy_url = f"/api/video_file?path={urllib.parse.quote(backup_target_path)}" if backup_target_path else ""
+            
             videos.append({
                 "id": r[0],
                 "original_path": r[1],
                 "proxy_url": proxy_url,
+                "original_audio_proxy_url": backup_proxy_url,
                 "duration": r[3],
                 "fps": r[4]
             })

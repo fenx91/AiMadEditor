@@ -51,6 +51,8 @@ export function buildIndependentDialogueClips(timelineSlots, lyrics, songDuratio
                 video_path: segment.dialogue_video_path || segment.video_path,
                 video_name: segment.dialogue_video_name || (segment.dialogue_video_path ? segment.dialogue_video_path.split(/[\\/]/).pop() : (segment.video_name || segment.video_path.split(/[\\/]/).pop())),
                 proxy_url: segment.dialogue_proxy_url || segment.proxy_url || '',
+                original_audio_proxy_url: segment.dialogue_original_audio_proxy_url || segment.original_audio_proxy_url || '',
+                use_original_audio: Boolean(segment.use_original_audio),
                 start_time: timing.start_time,
                 end_time: timing.end_time,
                 clip_start: timing.clip_start,
