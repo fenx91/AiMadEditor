@@ -271,7 +271,7 @@
               // Just sync audio volumes to let the capture engine extract/mix them correctly.
               if (slot.keepAudio) {
                 activeVideo.muted = false;
-                activeVideo.volume = targetDialogueVolume;
+                activeVideo.volume = Math.max(0, Math.min(1, targetDialogueVolume));
               } else {
                 activeVideo.muted = true;
               }
@@ -281,7 +281,7 @@
               
               if (slot.keepAudio) {
                 activeVideo.muted = false;
-                activeVideo.volume = targetDialogueVolume;
+                activeVideo.volume = Math.max(0, Math.min(1, targetDialogueVolume));
               } else {
                 activeVideo.muted = true;
               }
