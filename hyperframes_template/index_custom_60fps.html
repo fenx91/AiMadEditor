@@ -5,7 +5,7 @@
     <title>HyperFrames Render Template</title>
     <!-- GSAP for animations if needed -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;700&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;700&display=swap" rel="stylesheet">
     <style>
         body, html {
             margin: 0;
@@ -70,21 +70,61 @@
             text-align: center;
         }
     </style>
+
+<style>
+#lyrics-container {
+    font-family: 'Garamond', 'Georgia', 'Times New Roman', serif;
+    font-size: 36px; 
+    font-style: italic;    
+    text-transform: lowercase;     
+    /* 适度拉开字母间距 */
+    letter-spacing: 0.15em;
+    color: #e5e5e5;
+    text-shadow: 3px 2px 1px rgba(0,0,0,0.8);
+    position: absolute;
+    bottom: 8%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+</style>
 </head>
 <body>
 
-<div id="viewport" data-composition-id="mv" data-width="1920" data-height="1080" data-start="0" data-duration="10.44">
-    <!-- VIDEO_ELEMENTS_PLACEHOLDER -->
+<div id="viewport" data-composition-id="mv" data-width="1920" data-height="1080" data-start="0" data-duration="20.0">
+    <video class="video-layer" id="video_0" src="temp_video_0.mp4" data-start="0.0" data-duration="0.47999999999998977" preload="auto" muted></video>
+    <video class="video-layer" id="video_1" src="temp_video_1.mp4" data-start="0.47999999999998977" data-duration="1.3400000000000034" preload="auto" muted></video>
+    <video class="video-layer" id="video_2" src="temp_video_2.mp4" data-start="1.8199999999999932" data-duration="2.5600000000000023" preload="auto" muted></video>
+    <video class="video-layer" id="video_3" src="temp_video_3.mp4" data-start="4.3799999999999955" data-duration="1.259999999999991" preload="auto" muted></video>
+    <video class="video-layer" id="video_4" src="temp_video_4.mp4" data-start="5.639999999999986" data-duration="1.2600000000000193" preload="auto" muted></video>
+    <video class="video-layer" id="video_5" src="temp_video_5.mp4" data-start="6.900000000000006" data-duration="2.829999999999984" preload="auto" muted></video>
+    <video class="video-layer" id="video_6" src="temp_video_6.mp4" data-start="9.72999999999999" data-duration="2.3700000000000045" preload="auto" muted></video>
+    <video class="video-layer" id="video_7" src="temp_video_7.mp4" data-start="12.099999999999994" data-duration="2.5800000000000125" preload="auto" muted></video>
+    <video class="video-layer" id="video_8" src="temp_video_8.mp4" data-start="14.680000000000007" data-duration="2.5600000000000023" preload="auto" muted></video>
+    <video class="video-layer" id="video_9" src="temp_video_9.mp4" data-start="17.24000000000001" data-duration="2.1999999999999886" preload="auto" muted></video>
+    <video class="video-layer" id="video_10" src="temp_video_10.mp4" data-start="19.439999999999998" data-duration="0.5600000000000023" preload="auto" muted></video>
+    <audio class="dialogue-layer" id="dialogue_video_0" src="temp_dialogue_0.mp4" data-start="0.9000000000000057" data-duration="8.799999999999983" preload="auto" volume="5.0" data-volume="5.0" data-track-index="2"></audio>
+    <audio class="dialogue-layer" id="dialogue_video_1" src="temp_dialogue_1.mp4" data-start="13.0" data-duration="7.0" preload="auto" volume="5.0" data-volume="5.0" data-track-index="2"></audio>
     <!-- Transition overlays -->
     <div id="transition-overlay" style="position: absolute; inset: 0; pointer-events: none; z-index: 15; display: none; opacity: 0; background-color: #ffffff;"></div>
     <div id="whip-streak" style="position: absolute; top: 0; left: 0; width: 120%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent); display: none; pointer-events: none; z-index: 16; transform: translateX(-120%);"></div>
     
     <!-- Double Subtitles Overlay -->
-    <div id="dialogue-container" style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 36px; font-weight: 600; font-family: 'Noto Serif CJK SC', 'Source Han Serif SC', '思源宋体', 'Noto Serif SC', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 96%; white-space: nowrap; letter-spacing: 0.03em; display: none;"></div>
-    <div id="lyrics-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
+    <div id="dialogue-container" style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 42px; font-weight: 700; font-family: 'Inter', 'Noto Sans SC', sans-serif; text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
+    <div id="lyrics-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; pointer-events: none; max-width: 80%; line-height: 1.4; display: none; font-family: 'Garamond', 'Georgia', 'Times New Roman', serif;
+    font-size: 36px; 
+    font-style: italic;    
+    text-transform: lowercase;     
+    /* 适度拉开字母间距 */
+    letter-spacing: 0.15em;
+    color: #e5e5e5;
+    text-shadow: 3px 2px 1px rgba(0,0,0,0.8);
+    position: absolute;
+    bottom: 8%;
+    left: 50%;
+    transform: translateX(-50%);"></div>
 </div>
 
-<audio id="bg-audio" src="audio.mp3" data-start="0" data-duration="10.44" data-track-index="0" data-volume="1"></audio>
+<audio id="bg-audio" src="audio_custom_60fps.mp3" data-start="0" data-duration="20.0" data-track-index="0" data-volume="0.3"></audio></audio>
 
 <div id="hud">
     <div>TIME: <span id="hud-time">0.00s</span></div>
@@ -104,15 +144,15 @@
     let currentShowingIndex = -1;
     let mainTimeline = null;
     
-    // We fetch render_data.json
+    // We fetch render_data_custom_60fps.json
     async function loadRenderData() {
         try {
-            const response = await fetch('render_data.json');
+            const response = await fetch('render_data_custom_60fps.json');
             renderData = await response.json();
             initTemplate();
         } catch (e) {
             console.error("Error loading render data:", e);
-            document.body.innerHTML = `<h1 style="color:red; text-align:center; padding:100px;">Failed to load render_data.json</h1>`;
+            document.body.innerHTML = `<h1 style="color:red; text-align:center; padding:100px;">Failed to load render_data_custom_60fps.json</h1>`;
         }
     }
 
@@ -133,11 +173,8 @@
         // Setup Audio if present (for real-time browser preview)
         if (renderData.audioPath) {
             audio = document.getElementById('bg-audio');
-            const currentSrc = audio.getAttribute('src');
-            if (!currentSrc || currentSrc === 'audio.mp3' || currentSrc === 'audio.wav') {
-                const ext = renderData.audioPath.split('.').pop();
-                audio.src = 'audio.' + ext;
-            }
+            const ext = renderData.audioPath.split('.').pop();
+            audio.src = 'audio.' + ext;
             audio.load();
             audio.volume = renderData.musicVolume !== undefined ? renderData.musicVolume : 1.0;
         }

@@ -1,6 +1,6 @@
 /** Resolve the concrete clip shown for a lyric, including fallback continuation. */
 export function resolveEffectiveSlot(timelineSlots, lyrics, index) {
-    if (!lyrics) return null;
+    if (!lyrics || index === null || index === undefined || !lyrics[index]) return null;
     if (timelineSlots[index]) return { ...timelineSlots[index], isFallback: false };
 
     for (let previous = index - 1; previous >= 0; previous--) {
@@ -9,8 +9,9 @@ export function resolveEffectiveSlot(timelineSlots, lyrics, index) {
         const currentLyric = lyrics[index];
         const baseLyric = lyrics[previous];
         let clipStart = baseSlot.clip_start + (currentLyric.start - baseLyric.start);
-        if (baseSlot.video_duration && clipStart > baseSlot.video_duration - 0.1) {
-            clipStart = Math.max(0, baseSlot.video_duration - 0.1);
+        const durationLimit = baseSlot.video_duration || (baseSlot.clip_duration + 5.0);
+        if (clipStart > durationLimit - 0.1) {
+            clipStart = Math.max(0, durationLimit - 0.1);
         }
         return {
             video_path: baseSlot.video_path,

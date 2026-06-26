@@ -121,7 +121,11 @@ def api_get_videos():
             render_path = os.path.join("data/proxies", f"{base_name}_render.mp4") if base_name else ""
             backup_render_path = os.path.join("data/proxies_backup_20260623-013023", f"{base_name}_render.mp4") if base_name else ""
             
-            if render_path and os.path.exists(render_path):
+            bak_render_path = render_path + ".bak"
+            if bak_render_path and os.path.exists(bak_render_path):
+                # Prefer stable original proxy (.bak) for browser preview to avoid green screen or read-during-write conflicts
+                target_path = bak_render_path
+            elif render_path and os.path.exists(render_path):
                 target_path = render_path
             else:
                 target_path = r[2] if r[2] else original_path
@@ -272,28 +276,35 @@ def api_trim_music(req: TrimRequest):
 @app.post("/api/load_test_data")
 def api_load_test_data():
     import shutil
+    flac_path = "data/music/Adam Lambert - Whataya Want from Me.flac"
     src_mp3 = "tests/data/music/Adam Lambert - Whataya Want from Me_H.mp3"
     src_lrc = "tests/data/music/Adam Lambert - Whataya Want from Me_H.lrc"
     
-    if not os.path.exists(src_mp3):
-        raise HTTPException(status_code=404, detail="Test MP3 file not found.")
-        
-    dest_mp3 = os.path.join("data/music", os.path.basename(src_mp3))
     dest_lrc = os.path.join("data/music", os.path.basename(src_lrc))
     
+    # Try using the FLAC file if it exists, otherwise copy and use the test MP3 file
+    if os.path.exists(flac_path):
+        dest_audio = flac_path
+        try:
+            if not os.path.exists(dest_lrc) and os.path.exists(src_lrc):
+                shutil.copy2(src_lrc, dest_lrc)
+        except Exception as e:
+            print(f"Non-critical: failed to copy lrc for flac: {e}")
+    else:
+        if not os.path.exists(src_mp3):
+            raise HTTPException(status_code=404, detail="Test MP3 file not found.")
+        dest_audio = os.path.join("data/music", os.path.basename(src_mp3))
+        try:
+            shutil.copy2(src_mp3, dest_audio)
+            if os.path.exists(src_lrc):
+                shutil.copy2(src_lrc, dest_lrc)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to copy test files: {e}")
+            
     try:
-        shutil.copy2(src_mp3, dest_mp3)
-        if os.path.exists(src_lrc):
-            shutil.copy2(src_lrc, dest_lrc)
-        else:
-            dest_lrc = None
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to copy test files: {e}")
-        
-    try:
-        analysis = analyze_music(dest_mp3, lyric_path=dest_lrc)
-        analysis["audio_url"] = f"/data/music/{os.path.basename(src_mp3)}"
-        analysis["audio_path"] = dest_mp3
+        analysis = analyze_music(dest_audio, lyric_path=dest_lrc)
+        analysis["audio_url"] = f"/data/music/{os.path.basename(dest_audio)}"
+        analysis["audio_path"] = dest_audio
         analysis["lyric_path"] = dest_lrc
         return analysis
     except Exception as e:
@@ -748,7 +759,51 @@ def get_high_res_render_proxy(original_path):
 
 @app.post("/api/render")
 def api_render(req: RenderRequest):
-    return render_video(req)
+    import queue
+    import threading
+    import json
+    from fastapi.responses import StreamingResponse, JSONResponse
+    
+    q = queue.Queue()
+    
+    def callback(percent, message):
+        q.put({"type": "progress", "percent": percent, "message": message})
+            
+    def run():
+        try:
+            res = render_video(req, callback=callback)
+            if isinstance(res, dict) and res.get("status") == "success":
+                q.put({
+                    "type": "success", 
+                    "output_path": res.get("output_path"), 
+                    "output_url": res.get("output_url")
+                })
+            elif isinstance(res, JSONResponse):
+                try:
+                    err_data = json.loads(res.body.decode('utf-8'))
+                    detail = err_data.get("detail", "渲染失败")
+                    cmd = err_data.get("cmd", "")
+                except Exception:
+                    detail = str(res.body)
+                    cmd = ""
+                q.put({"type": "error", "message": detail, "cmd": cmd})
+            else:
+                q.put({"type": "error", "message": f"渲染返回值异常: {res}"})
+        except Exception as e:
+            q.put({"type": "error", "message": f"渲染发生异常: {str(e)}"})
+        finally:
+            q.put(None) # Sentinel to stop generator
+            
+    threading.Thread(target=run, daemon=True).start()
+    
+    def generator():
+        while True:
+            item = q.get()
+            if item is None:
+                break
+            yield json.dumps(item) + "\n"
+            
+    return StreamingResponse(generator(), media_type="text/event-stream")
 
 
 @app.post("/api/export_xml")

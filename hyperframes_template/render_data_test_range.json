@@ -1,0 +1,53 @@
+{
+  "slots": [
+    {
+      "startTime": 0.0,
+      "endTime": 0.48,
+      "videoPath": "temp_video_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 0.48,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 0.48,
+      "endTime": 3.96,
+      "videoPath": "temp_video_1.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 3.48,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 3.96,
+      "endTime": 4.0,
+      "videoPath": "temp_video_2.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 0.040000000000000036,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    }
+  ],
+  "dialogueClips": [
+    {
+      "startTime": 0.0,
+      "endTime": 2.5,
+      "videoPath": "temp_dialogue_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.5,
+      "transcript": "\u6211\u672c\u6765\u662f\u72ec\u7acb\u53f0\u8bcd\uff08\u8de8\u89c6\u9891\u7247\u6bb5\u4e14\u65e0\u753b\u9762\uff09",
+      "speaker": "Sasaki"
+    }
+  ],
+  "audioPath": "/home/fenxy/editor/data/trimmed_cache/audio_193257cf7e71abfb83672562937cac61.mp3",
+  "lyrics": [],
+  "musicVolume": 1.0,
+  "dialogueVolume": 1.0,
+  "duration": 4.0
+}

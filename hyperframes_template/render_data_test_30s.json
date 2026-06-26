@@ -1,0 +1,186 @@
+{
+  "slots": [
+    {
+      "startTime": 0.0,
+      "endTime": 10.44,
+      "videoPath": "temp_video_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 10.44,
+      "keepAudio": false,
+      "transcript": "\u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 10.44,
+      "endTime": 14.95,
+      "videoPath": "temp_video_1.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 4.51,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "whip-pan"
+    },
+    {
+      "startTime": 14.95,
+      "endTime": 17.52,
+      "videoPath": "temp_video_2.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.5700000000000003,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 17.52,
+      "endTime": 20.79,
+      "videoPath": "temp_video_3.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 3.2699999999999996,
+      "keepAudio": false,
+      "transcript": "\u7ed3\u679c\u4ec0\u4e48\u4e5f\u6ca1\u5b9a\u4e0b\u6765 \u6211\u8981\u5bb0\u4e86\u4ed6\u2026 \u5f00\u73a9\u7b11\u7684 \u8fd9\u79cd\u65f6\u5019\u2026",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 20.79,
+      "endTime": 25.3,
+      "videoPath": "temp_video_4.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 4.510000000000002,
+      "keepAudio": false,
+      "transcript": "\u4e5f\u8bb8\u6211\u8be5\u8fdb\u53bb\u9053\u4e2a\u6b49 \u6211\u53ea\u662f\u60f3\u8868\u8fbe\u4e00\u4e0b\u611f\u8c22",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 25.3,
+      "endTime": 27.81,
+      "videoPath": "temp_video_5.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.509999999999998,
+      "keepAudio": false,
+      "transcript": "\u5982\u679c\u662f\u7b2c\u4e00\u6839\u2026",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 27.81,
+      "endTime": 30.0,
+      "videoPath": "temp_video_6.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.1900000000000013,
+      "keepAudio": false,
+      "transcript": "\u518d\u5f80\u8863\u670d\u4e0a\u55b7\u70b9\u55b7\u96fe\u5c31\u641e\u5b9a\u4e86 \u4f46\u6709\u65f6\u5019\u2026",
+      "speaker": "unknown",
+      "transition": "none"
+    }
+  ],
+  "dialogueClips": [],
+  "audioPath": "/home/fenxy/editor/data/trimmed_cache/audio_601d19877b4a46f893fccbade9367d67.mp3",
+  "lyrics": [
+    {
+      "start": 0.0,
+      "end": 10.44,
+      "text": "\u524d\u594f / Intro",
+      "is_intro": true,
+      "beats": [
+        0.139,
+        0.789,
+        1.44,
+        2.09,
+        2.74,
+        3.437,
+        4.133,
+        4.83,
+        5.48,
+        6.13,
+        6.78,
+        7.43,
+        8.034,
+        8.568,
+        9.195,
+        9.822
+      ]
+    },
+    {
+      "start": 10.44,
+      "text": "Hey slow it down",
+      "end": 14.95,
+      "beats": [
+        10.472,
+        11.122,
+        11.773,
+        12.399,
+        13.05,
+        13.7,
+        14.35
+      ]
+    },
+    {
+      "start": 14.95,
+      "text": "Whataya want from me",
+      "end": 17.52,
+      "beats": [
+        14.977,
+        15.627,
+        16.277,
+        16.927
+      ]
+    },
+    {
+      "start": 17.52,
+      "text": "Whataya want from me",
+      "end": 20.79,
+      "beats": [
+        17.554,
+        18.228,
+        18.855,
+        19.505,
+        20.132
+      ]
+    },
+    {
+      "start": 20.79,
+      "text": "Yeah I'm afraid",
+      "end": 25.3,
+      "beats": [
+        20.805,
+        21.432,
+        22.082,
+        22.709,
+        23.382,
+        24.009,
+        24.66
+      ]
+    },
+    {
+      "start": 25.3,
+      "text": "Whataya want from me",
+      "end": 27.81,
+      "beats": [
+        25.31,
+        25.96,
+        26.587,
+        27.237
+      ]
+    },
+    {
+      "start": 27.81,
+      "text": "Whataya want from me",
+      "end": 30.0,
+      "beats": [
+        27.887,
+        28.537,
+        29.187,
+        29.814,
+        30.465
+      ]
+    }
+  ],
+  "musicVolume": 0.3,
+  "dialogueVolume": 5.0,
+  "duration": 30.0
+}

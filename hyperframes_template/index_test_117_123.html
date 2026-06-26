@@ -70,21 +70,49 @@
             text-align: center;
         }
     </style>
+
+<style>
+#lyrics-container {
+    font-family: 'Garamond', 'Georgia', 'Times New Roman', serif;
+    font-size: 36px; 
+    font-style: italic;    
+    text-transform: lowercase;     
+    /* 适度拉开字母间距 */
+    letter-spacing: 0.15em;
+    color: #e5e5e5;
+    text-shadow: 3px 2px 1px rgba(0,0,0,0.8);
+    position: absolute;
+    bottom: 8%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+</style>
 </head>
 <body>
 
-<div id="viewport" data-composition-id="mv" data-width="1920" data-height="1080" data-start="0" data-duration="10.44">
-    <!-- VIDEO_ELEMENTS_PLACEHOLDER -->
+<div id="viewport" data-composition-id="mv" data-width="1920" data-height="1080" data-start="0" data-duration="6.0">
+    <video class="video-layer" id="video_0" src="temp_video_0.mp4" data-start="0.0" data-duration="6.0" preload="auto" volume="5.0"></video>
     <!-- Transition overlays -->
     <div id="transition-overlay" style="position: absolute; inset: 0; pointer-events: none; z-index: 15; display: none; opacity: 0; background-color: #ffffff;"></div>
     <div id="whip-streak" style="position: absolute; top: 0; left: 0; width: 120%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent); display: none; pointer-events: none; z-index: 16; transform: translateX(-120%);"></div>
     
     <!-- Double Subtitles Overlay -->
     <div id="dialogue-container" style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%); z-index: 999; color: #ffffff; font-size: 36px; font-weight: 600; font-family: 'Noto Serif CJK SC', 'Source Han Serif SC', '思源宋体', 'Noto Serif SC', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 96%; white-space: nowrap; letter-spacing: 0.03em; display: none;"></div>
-    <div id="lyrics-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"></div>
+    <div id="lyrics-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; pointer-events: none; max-width: 80%; line-height: 1.4; display: none; font-family: 'Garamond', 'Georgia', 'Times New Roman', serif;
+    font-size: 36px; 
+    font-style: italic;    
+    text-transform: lowercase;     
+    /* 适度拉开字母间距 */
+    letter-spacing: 0.15em;
+    color: #e5e5e5;
+    text-shadow: 3px 2px 1px rgba(0,0,0,0.8);
+    position: absolute;
+    bottom: 8%;
+    left: 50%;
+    transform: translateX(-50%);"></div>
 </div>
 
-<audio id="bg-audio" src="audio.mp3" data-start="0" data-duration="10.44" data-track-index="0" data-volume="1"></audio>
+<audio id="bg-audio" src="audio_test_117_123.mp3" data-start="0" data-duration="6.0" data-track-index="0" data-volume="0.3"></audio></audio>
 
 <div id="hud">
     <div>TIME: <span id="hud-time">0.00s</span></div>
@@ -104,15 +132,15 @@
     let currentShowingIndex = -1;
     let mainTimeline = null;
     
-    // We fetch render_data.json
+    // We fetch render_data_test_117_123.json
     async function loadRenderData() {
         try {
-            const response = await fetch('render_data.json');
+            const response = await fetch('render_data_test_117_123.json');
             renderData = await response.json();
             initTemplate();
         } catch (e) {
             console.error("Error loading render data:", e);
-            document.body.innerHTML = `<h1 style="color:red; text-align:center; padding:100px;">Failed to load render_data.json</h1>`;
+            document.body.innerHTML = `<h1 style="color:red; text-align:center; padding:100px;">Failed to load render_data_test_117_123.json</h1>`;
         }
     }
 

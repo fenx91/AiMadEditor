@@ -1,0 +1,55 @@
+{
+  "slots": [
+    {
+      "startTime": 0.0,
+      "endTime": 6.0,
+      "videoPath": "temp_video_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 6.0,
+      "keepAudio": true,
+      "transcript": "\u4e3a\u4ec0\u4e48\u4f60\u80fd\u770b\u51fa\u6211\u6709\u5728\u62fc\u547d\u52aa\u529b",
+      "speaker": "yamada",
+      "transition": "none"
+    }
+  ],
+  "dialogueClips": [],
+  "audioPath": "/home/fenxy/editor/data/trimmed_cache/audio_2ee6447ec125f4110111070965e017ab.mp3",
+  "lyrics": [
+    {
+      "start": 0.0,
+      "text": "Please don't give in",
+      "end": 2.769999999999996,
+      "beats": [
+        116.912,
+        117.586,
+        118.213,
+        118.863,
+        119.513
+      ]
+    },
+    {
+      "start": 2.769999999999996,
+      "text": "I won't let you down",
+      "end": 5.090000000000003,
+      "beats": [
+        120.163,
+        120.79,
+        121.44
+      ]
+    },
+    {
+      "start": 5.090000000000003,
+      "text": "It messed me up",
+      "end": 6.0,
+      "beats": [
+        122.091,
+        122.741,
+        123.368,
+        124.018
+      ]
+    }
+  ],
+  "musicVolume": 0.3,
+  "dialogueVolume": 5.0,
+  "duration": 6.0
+}

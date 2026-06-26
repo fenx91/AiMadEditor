@@ -112,9 +112,13 @@
                         <video id="preview-player-a" preload="auto" muted style="width: 100%; height: 100%; object-fit: contain; display: none;"></video>
                         <video id="preview-player-b" preload="auto" muted style="width: 100%; height: 100%; object-fit: contain; display: none;"></video>
                         
+                        <!-- Transition overlays for web preview -->
+                        <div id="transition-overlay" style="position: absolute; inset: 0; pointer-events: none; z-index: 15; display: none; opacity: 0; background-color: #ffffff;"></div>
+                        <div id="whip-streak" style="position: absolute; top: 0; left: 0; width: 120%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent); display: none; pointer-events: none; z-index: 16; transform: translateX(-120%);"></div>
+                        
                         <!-- Monitor Preview Subtitles Overlay (Top & Bottom) -->
-                        <div id="monitor-dialogue-overlay" style="position: absolute; top: 8%; left: 50%; transform: translateX(-50%); z-index: 10; font-size: 24px; font-weight: 700; font-family: sans-serif; text-shadow: 0 0 5px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 90%; line-height: 1.4; display: none;"></div>
-                        <div id="monitor-lyric-overlay" style="position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%); z-index: 9; color: #ffffff; font-size: 20px; font-weight: 500; font-family: sans-serif; text-shadow: 0 0 5px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 90%; line-height: 1.4; display: none;"></div>
+                        <div id="monitor-dialogue-overlay" style="position: absolute; top: 8%; left: 50%; transform: translateX(-50%); z-index: 999; font-size: 24px; font-weight: 700; font-family: sans-serif; text-shadow: 0 0 5px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 90%; line-height: 1.4; display: none;"></div>
+                        <div id="monitor-lyric-overlay" style="position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%); z-index: 999; color: #e5e5e5; font-size: 18px; font-weight: 500; font-family: 'Garamond', 'Georgia', serif; letter-spacing: 0.15em; text-transform: lowercase; opacity: 0.9; text-shadow: 0 0 5px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.95); text-align: center; pointer-events: none; max-width: 90%; line-height: 1.4; display: none;"></div>
                         
                         <div class="video-placeholder" id="video-placeholder">
                             <div class="placeholder-content">
@@ -160,8 +164,8 @@
                                 <input type="range" id="music-volume-slider" min="0" max="1" step="0.05" value="0.8" style="width: 60px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255, 255, 255, 0.15); border-radius: 2px; outline: none;" />
                                 <span id="music-volume-value" style="min-width: 34px; color: #00f2fe; font-family: var(--font-mono); text-align: right;">0.80</span>
                                 <span style="color: var(--text-secondary); white-space: nowrap; margin-left: 8px;">🎙️ 台词:</span>
-                                <input type="range" id="dialogue-volume-slider" min="0" max="4" step="0.05" value="0.8" style="width: 70px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255, 255, 255, 0.15); border-radius: 2px; outline: none;" />
-                                <span id="dialogue-volume-value" style="min-width: 34px; color: #ffcc00; font-family: var(--font-mono); text-align: right;">0.80</span>
+                                <input type="range" id="dialogue-volume-slider" min="0" max="50" step="0.1" value="0.8" style="width: 70px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255, 255, 255, 0.15); border-radius: 2px; outline: none;" />
+                                <input type="number" id="dialogue-volume-input" min="0" max="50" step="0.1" value="0.8" style="width: 45px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 3px; color: #ffcc00; font-family: var(--font-mono); font-size: 11px; text-align: center; margin-left: 4px; padding: 2px 0;" />
                             </div>
                         </div>
                         <div class="bpm-info" id="bpm-display">BPM: --</div>
@@ -247,6 +251,23 @@
                         </div>
                     </div>
                     
+                    <!-- Section C: Lyric Typography CSS -->
+                    <div class="collapsible-header" data-target="planner-lyric-style-content" style="border-bottom: 1px solid var(--border-color); border-top: 1px solid var(--border-color);">
+                        <span>🎨 歌词字幕排版 CSS</span>
+                        <span class="collapse-icon">▶</span>
+                    </div>
+                    <div id="planner-lyric-style-content" class="collapsible-content">
+                        <div class="lyric-style-settings" style="padding: 15px; background: rgba(255, 255, 255, 0.005); border-bottom: 1px solid var(--border-color);">
+                            <div class="form-group" style="margin-bottom: 8px;">
+                                <label for="lyric-css-input" style="font-size: 11px; font-weight: 500; margin-bottom: 6px; display: block;">🎨 歌词字幕自定义 CSS 样式:</label>
+                                <textarea id="lyric-css-input" style="width: 100%; height: 80px; padding: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; color: #a0c0a0; font-family: monospace; font-size: 11px; resize: none; outline: none;" placeholder="例如: color: #e5e5e5; font-family: 'Garamond', serif; letter-spacing: 0.15em;"></textarea>
+                            </div>
+                            <div style="font-size: 10px; color: var(--text-muted); line-height: 1.4;">
+                                💡 支持标准 CSS 属性。修改会自动实时应用到预览播放器，并在点击“保存微调”时保存到配置中。
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Section B: Script Outline -->
                     <div class="collapsible-header active" data-target="planner-outline-content" style="border-bottom: 1px solid var(--border-color); border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                         <span style="display: flex; align-items: center; gap: 6px;">
@@ -306,6 +327,18 @@
                                         <option value="yamada">山田 / 粉色</option>
                                     </select>
                                     <span id="slot-speaker-status" style="font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">先匹配素材</span>
+                                </div>
+                            </div>
+                            <div id="slot-transition-controls" style="margin-top: 10px; display: grid; grid-template-columns: 86px 1fr; align-items: center; gap: 8px;">
+                                <label for="slot-transition-select" style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em;">转场动画</label>
+                                <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                                    <select id="slot-transition-select" disabled style="flex: 0 0 132px; min-width: 0; padding: 5px 7px; background: rgba(0,0,0,0.28); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-size: 11px; outline: none;">
+                                        <option value="none">无 (直接硬切)</option>
+                                        <option value="whip-pan">✨ Whip-pan (扫光拉镜)</option>
+                                        <option value="cross-fade">🌫️ Cross-fade (交叉淡化)</option>
+                                        <option value="flash-through-white">⚡ Flash-white (白闪过渡)</option>
+                                    </select>
+                                    <span id="slot-transition-status" style="font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">先匹配素材</span>
                                 </div>
                             </div>
                             <div id="slot-dialogue-controls" class="slot-dialogue-controls">
@@ -488,6 +521,9 @@
                 <button type="button" id="save-setup-btn" class="btn btn-secondary btn-large" style="border-color: rgba(255, 204, 0, 0.3); color: #ffcc00; padding: 0 15px; font-weight: 500;">
                     💾 保存微调
                 </button>
+                <button type="button" id="auto-transition-btn" class="btn btn-secondary btn-large" style="border-color: rgba(255, 128, 191, 0.3); color: #ff80bf; padding: 0 15px; font-weight: 500;" disabled>
+                    ✨ 自动转场
+                </button>
                 <button type="button" id="load-setup-btn" class="btn btn-secondary btn-large" style="border-color: rgba(0, 242, 254, 0.3); color: #00f2fe; padding: 0 15px; font-weight: 500;">
                     📂 读取微调
                 </button>
@@ -587,6 +623,7 @@
         </div>
     </div>
 
-    <script type="module" src="/assets/app.js?v=34"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script type="module" src="/assets/app.js?v=39"></script>
 </body>
 </html>

@@ -1,0 +1,53 @@
+{
+  "slots": [
+    {
+      "startTime": 0.0,
+      "endTime": 3.48,
+      "videoPath": "temp_video_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 3.48,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 3.48,
+      "endTime": 6.96,
+      "videoPath": "temp_video_1.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 3.48,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 6.96,
+      "endTime": 10.44,
+      "videoPath": "temp_video_2.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 3.4799999999999995,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    }
+  ],
+  "dialogueClips": [
+    {
+      "startTime": 2.0,
+      "endTime": 5.5,
+      "videoPath": "temp_dialogue_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 3.5,
+      "transcript": "\u6211\u672c\u6765\u662f\u72ec\u7acb\u53f0\u8bcd\uff08\u8de8\u89c6\u9891\u7247\u6bb5\u4e14\u65e0\u753b\u9762\uff09",
+      "speaker": "Sasaki"
+    }
+  ],
+  "audioPath": "/home/fenxy/editor/tests/data/music/Adam Lambert - Whataya Want from Me_H.mp3",
+  "lyrics": [],
+  "musicVolume": 0.0,
+  "dialogueVolume": 1.0,
+  "duration": 10.44
+}

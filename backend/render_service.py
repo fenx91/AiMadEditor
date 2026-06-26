@@ -12,12 +12,37 @@ from fastapi.responses import JSONResponse
 from schemas import RenderRequest, TimelineSlot
 
 
+def is_rife_running():
+    try:
+        import subprocess
+        # Check if any process has 'run_rife' in command line
+        res = subprocess.run(["pgrep", "-f", "run_rife"], stdout=subprocess.PIPE)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def is_file_open_by_any_process(filepath):
+    try:
+        import subprocess
+        res = subprocess.run(["fuser", filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
 def get_high_res_render_proxy(original_path):
     base_name = os.path.splitext(os.path.basename(original_path))[0]
     proxy_dir = "data/proxies"
     os.makedirs(proxy_dir, exist_ok=True)
     render_proxy_path = os.path.join(proxy_dir, f"{base_name}_render.mp4")
     
+    # If the .mp4 file is currently open/written to by RIFE, error out to let the user know
+    if is_rife_running() and is_file_open_by_any_process(render_proxy_path):
+        raise ValueError(
+            f"视频代理文件 '{base_name}_render.mp4' 正在被 RIFE 插帧程序写入中，请等待该集插帧完成后再进行渲染。"
+        )
+            
     if os.path.exists(render_proxy_path):
         return render_proxy_path
         
@@ -56,8 +81,193 @@ def get_high_res_render_proxy(original_path):
         
     return render_proxy_path
 
-def render_video(req: RenderRequest):
+
+def merge_contiguous_slots(slots):
+    if not slots:
+        return []
+    
+    merged = []
+    current = slots[0]
+    
+    for s in slots[1:]:
+        is_same_video = (current.video_path == s.video_path)
+        is_contiguous_timeline = (abs(current.end_time - s.start_time) < 0.01)
+        
+        # Check if clip is contiguous
+        expected_clip_start = current.clip_start + current.clip_duration
+        is_contiguous_clip = (abs(expected_clip_start - s.clip_start) < 0.05)
+        
+        is_same_audio = (current.keep_audio == s.keep_audio)
+        is_same_orig_audio = (getattr(current, 'use_original_audio', False) == getattr(s, 'use_original_audio', False))
+        
+        trans = getattr(s, 'transition', 'none')
+        if trans is None:
+            trans = 'none'
+        has_no_transition = (trans.lower() == 'none')
+        
+        is_same_transcript = (getattr(current, 'transcript', '') == getattr(s, 'transcript', ''))
+        is_same_speaker = (getattr(current, 'speaker', '') == getattr(s, 'speaker', ''))
+        is_same_dialogue_ind = (getattr(current, 'dialogue_independent', False) == getattr(s, 'dialogue_independent', False))
+        is_same_d_video_path = (getattr(current, 'dialogue_video_path', None) == getattr(s, 'dialogue_video_path', None))
+        
+        if (is_same_video and is_contiguous_timeline and is_contiguous_clip and 
+            is_same_audio and is_same_orig_audio and has_no_transition and 
+            is_same_transcript and is_same_speaker and
+            is_same_dialogue_ind and is_same_d_video_path):
+            
+            # Extend current slot
+            current.end_time = s.end_time
+            current.clip_duration = current.clip_duration + s.clip_duration
+        else:
+            merged.append(current)
+            current = s
+            
+    merged.append(current)
+    return merged
+
+
+def get_video_duration(video_path):
+    # Try querying SQLite database data/metadata.db first
     try:
+        import sqlite3
+        db_path = "data/metadata.db"
+        if os.path.exists(db_path):
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            abs_path = os.path.abspath(video_path)
+            cursor.execute("SELECT duration FROM videos WHERE original_path = ? OR proxy_path = ?", (video_path, video_path))
+            row = cursor.fetchone()
+            if not row:
+                cursor.execute("SELECT duration FROM videos WHERE original_path = ? OR proxy_path = ?", (abs_path, abs_path))
+                row = cursor.fetchone()
+            conn.close()
+            if row and row[0] > 0:
+                return float(row[0])
+    except Exception as e:
+        print(f"Error querying database for video duration of {video_path}: {e}")
+
+    # Fallback to ffprobe
+    try:
+        import shutil
+        import json
+        import subprocess
+        ffprobe = shutil.which("ffprobe") or "ffprobe"
+        cmd = [
+            ffprobe, "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "format=duration",
+            "-of", "json", video_path
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+        data = json.loads(out)
+        duration = float(data.get("format", {}).get("duration", 0.0))
+        if duration > 0:
+            return duration
+    except Exception as e:
+        # Also try resolved proxy path in data/proxies
+        try:
+            base_name = os.path.splitext(os.path.basename(video_path))[0]
+            proxy_path = os.path.abspath(f"data/proxies/{base_name}_render.mp4")
+            if os.path.exists(proxy_path):
+                cmd[6] = proxy_path
+                out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+                data = json.loads(out)
+                duration = float(data.get("format", {}).get("duration", 0.0))
+                if duration > 0:
+                    return duration
+        except:
+            pass
+        print(f"Error running ffprobe for video duration of {video_path}: {e}")
+        
+    return None
+
+
+def resolve_inherited_slots(slots, lyrics):
+    if not lyrics:
+        return slots
+        
+    slots = sorted(slots, key=lambda s: s.start_time)
+    resolved_slots = []
+    
+    for lyric in lyrics:
+        lyric_start = lyric.get("start", 0.0)
+        lyric_end = lyric.get("end", 0.0)
+        
+        matching_slots = [s for s in slots if lyric_start - 0.01 <= s.start_time < lyric_end - 0.01]
+        
+        if matching_slots:
+            resolved_slots.extend(matching_slots)
+        else:
+            prev_slots = [s for s in slots if s.start_time < lyric_start - 0.01]
+            base_slot = None
+            if prev_slots:
+                base_slot = prev_slots[-1]
+            if not base_slot and slots:
+                base_slot = slots[0]
+                
+            if base_slot:
+                clip_start = base_slot.clip_start + (lyric_start - base_slot.start_time)
+                
+                # Fetch video duration to clamp clip_start
+                video_dur = get_video_duration(base_slot.video_path)
+                if video_dur is not None and video_dur > 0:
+                    if clip_start > video_dur - 0.1:
+                        clip_start = max(0.0, video_dur - 0.1)
+                
+                # Make sure clip_start is non-negative and clip_duration is valid
+                clip_start = max(0.0, clip_start)
+                clip_duration = max(0.0, lyric_end - lyric_start)
+                
+                inherited_slot = TimelineSlot(
+                    start_time=lyric_start,
+                    end_time=lyric_end,
+                    video_path=base_slot.video_path,
+                    clip_start=clip_start,
+                    clip_duration=clip_duration,
+                    keep_audio=base_slot.keep_audio,
+                    transcript=base_slot.transcript,
+                    speaker=base_slot.speaker,
+                    speaker_manual=base_slot.speaker_manual,
+                    dialogue_independent=base_slot.dialogue_independent,
+                    dialogue_start_time=base_slot.dialogue_start_time,
+                    dialogue_end_time=base_slot.dialogue_end_time,
+                    dialogue_clip_start=base_slot.dialogue_clip_start,
+                    dialogue_video_path=base_slot.dialogue_video_path,
+                    use_original_audio=base_slot.use_original_audio,
+                    transition=None
+                )
+                resolved_slots.append(inherited_slot)
+                
+    return resolved_slots
+
+
+def render_video(req: RenderRequest, callback=None):
+    if callback: callback(2, "正在解析卡点对齐与素材映射...")
+    try:
+        # Resolve inherited (fallback) slots if there are gaps
+        if req.lyrics and req.slots:
+            req.slots = resolve_inherited_slots(req.slots, req.lyrics)
+            
+        # Clamp all slots and dialogue clips to their video duration to prevent black screen
+        for slot in req.slots:
+            if slot.video_path:
+                dur = get_video_duration(slot.video_path)
+                if dur and dur > 0:
+                    if slot.clip_start > dur - 0.1:
+                        old_start = slot.clip_start
+                        slot.clip_start = max(0.0, dur - 0.1)
+                        print(f"Clamped slot clip_start for {slot.video_path} from {old_start:.2f}s to {slot.clip_start:.2f}s (dur={dur:.2f}s)")
+                        
+        if req.dialogue_clips:
+            for d_clip in req.dialogue_clips:
+                if d_clip.video_path:
+                    dur = get_video_duration(d_clip.video_path)
+                    if dur and dur > 0:
+                        if d_clip.clip_start > dur - 0.1:
+                            old_start = d_clip.clip_start
+                            d_clip.clip_start = max(0.0, dur - 0.1)
+                            print(f"Clamped dialogue clip_start for {d_clip.video_path} from {old_start:.2f}s to {d_clip.clip_start:.2f}s (dur={dur:.2f}s)")
+
         # Range Render Pre-processing
         range_start = req.range_start
         range_end = req.range_end
@@ -95,7 +305,15 @@ def render_video(req: RenderRequest):
                             clip_duration=new_clip_duration,
                             keep_audio=slot.keep_audio,
                             transcript=slot.transcript,
-                            speaker=slot.speaker
+                            speaker=slot.speaker,
+                            speaker_manual=slot.speaker_manual,
+                            dialogue_independent=slot.dialogue_independent,
+                            dialogue_start_time=slot.dialogue_start_time,
+                            dialogue_end_time=slot.dialogue_end_time,
+                            dialogue_clip_start=slot.dialogue_clip_start,
+                            dialogue_video_path=slot.dialogue_video_path,
+                            use_original_audio=slot.use_original_audio,
+                            transition=slot.transition
                         ))
                 req.slots = new_slots
                 
@@ -114,7 +332,29 @@ def render_video(req: RenderRequest):
                             new_lyrics.append(new_lyric)
                     req.lyrics = new_lyrics
                 
-                # 3. Crop audio using FFmpeg
+                # 3. Filter and shift independent dialogue clips
+                if req.dialogue_clips:
+                    new_dialogue_clips = []
+                    for d_clip in req.dialogue_clips:
+                        if d_clip.end_time > r_start and d_clip.start_time < r_end:
+                            new_start = max(0.0, d_clip.start_time - r_start)
+                            new_end = min(range_duration, d_clip.end_time - r_start)
+                            
+                            shift_offset = 0.0
+                            if d_clip.start_time < r_start:
+                                shift_offset = r_start - d_clip.start_time
+                                
+                            new_clip_start = d_clip.clip_start + shift_offset
+                            new_clip_duration = new_end - new_start
+                            
+                            d_clip.start_time = new_start
+                            d_clip.end_time = new_end
+                            d_clip.clip_start = new_clip_start
+                            d_clip.clip_duration = new_clip_duration
+                            new_dialogue_clips.append(d_clip)
+                    req.dialogue_clips = new_dialogue_clips
+                
+                # 4. Crop audio using FFmpeg
                 import hashlib
                 audio_cache_key = f"{req.audio_path}_{r_start}_{range_duration}"
                 audio_hash = hashlib.md5(audio_cache_key.encode("utf-8")).hexdigest()
@@ -135,6 +375,9 @@ def render_video(req: RenderRequest):
                     subprocess.run(crop_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 req.audio_path = cropped_audio_path
+
+        # Merge contiguous slots that refer to the same video file and play continuously
+        req.slots = merge_contiguous_slots(req.slots)
 
         # Save render decision list data to hyperframes template directory
         # Translate local audio path to absolute/web path
@@ -163,7 +406,10 @@ def render_video(req: RenderRequest):
         # Prepare slots using relative paths relative to hyperframes_template/
         # Prepare slots and hard links inside hyperframes_template/
         slots_data = []
+        num_slots = len(req.slots)
         for slot_idx, slot in enumerate(req.slots):
+            if callback:
+                callback(int(5 + (slot_idx / num_slots) * 15), f"正在裁剪与对准视频卡点 {slot_idx + 1}/{num_slots}...")
             abs_video_path = os.path.abspath(slot.video_path)
             resolved_path = abs_video_path
             
@@ -172,9 +418,13 @@ def render_video(req: RenderRequest):
                 use_orig = getattr(slot, 'use_original_audio', False)
                 base_name = os.path.splitext(os.path.basename(abs_video_path))[0]
                 backup_path = os.path.abspath(f"data/proxies_backup_20260623-013023/{base_name}_render.mp4")
-                if use_orig and os.path.exists(backup_path):
-                    resolved_path = backup_path
-                    print(f"Mapped to backup original proxy with full background sound: {resolved_path}")
+                if use_orig:
+                    if os.path.exists(backup_path):
+                        resolved_path = backup_path
+                        print(f"Mapped to backup original proxy with full background sound: {resolved_path}")
+                    else:
+                        resolved_path = abs_video_path
+                        print(f"Backup original proxy missing. Falling back to original video file for full background sound: {resolved_path}")
                 else:
                     resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
                     print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
@@ -182,8 +432,9 @@ def render_video(req: RenderRequest):
             import hashlib
             slot_duration = slot.end_time - slot.start_time
             
-            # Construct a unique cache key based on video path, clip start, and duration
-            cache_key_str = f"{resolved_path}_{slot.clip_start}_{slot_duration}"
+            slot_vol = req.dialogue_volume if (slot.keep_audio and req.dialogue_volume is not None) else 1.0
+            # Construct a unique cache key based on video path, clip start, duration, and volume (if keeping audio)
+            cache_key_str = f"{resolved_path}_{slot.clip_start}_{slot_duration}_{slot_vol}"
             cache_hash = hashlib.md5(cache_key_str.encode("utf-8")).hexdigest()
             cache_dir = os.path.abspath("data/trimmed_cache")
             os.makedirs(cache_dir, exist_ok=True)
@@ -228,9 +479,12 @@ def render_video(req: RenderRequest):
                     "-i", resolved_path,
                     "-c:v", "libx264", "-crf", "18", "-preset", "ultrafast",
                     "-pix_fmt", "yuv420p",
-                    "-c:a", "aac", "-b:a", "192k",
-                    temp_path
                 ]
+                if slot.keep_audio and slot_vol != 1.0:
+                    trim_cmd.extend(["-af", f"volume={slot_vol},alimiter=limit=0.99", "-c:a", "aac", "-b:a", "192k"])
+                else:
+                    trim_cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+                trim_cmd.append(temp_path)
                 
                 print(f"Trimming slot {slot_idx}: {resolved_path} from {slot.clip_start}s to {slot.clip_start + slot_duration}s...")
                 trim_res = subprocess.run(trim_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -256,13 +510,17 @@ def render_video(req: RenderRequest):
                 "clipDuration": clip_dur_val,
                 "keepAudio": slot.keep_audio,
                 "transcript": slot.transcript,
-                "speaker": slot.speaker
+                "speaker": slot.speaker,
+                "transition": getattr(slot, "transition", None)
             })
 
         # Prepare independent dialogue clips for HyperFrames rendering
         dialogue_clips_data = []
         if req.dialogue_clips:
+            num_dialogues = len(req.dialogue_clips)
             for d_idx, d_clip in enumerate(req.dialogue_clips):
+                if callback:
+                    callback(int(20 + (d_idx / num_dialogues) * 10), f"正在裁剪与对齐台词音频 {d_idx + 1}/{num_dialogues}...")
                 abs_video_path = os.path.abspath(d_clip.video_path)
                 resolved_path = abs_video_path
                 
@@ -271,9 +529,13 @@ def render_video(req: RenderRequest):
                     use_orig = getattr(d_clip, 'use_original_audio', False)
                     base_name = os.path.splitext(os.path.basename(abs_video_path))[0]
                     backup_path = os.path.abspath(f"data/proxies_backup_20260623-013023/{base_name}_render.mp4")
-                    if use_orig and os.path.exists(backup_path):
-                        resolved_path = backup_path
-                        print(f"Mapped independent dialogue to backup original proxy: {resolved_path}")
+                    if use_orig:
+                        if os.path.exists(backup_path):
+                            resolved_path = backup_path
+                            print(f"Mapped independent dialogue to backup original proxy: {resolved_path}")
+                        else:
+                            resolved_path = abs_video_path
+                            print(f"Backup original proxy missing. Falling back to original video file: {resolved_path}")
                     else:
                         resolved_path = os.path.abspath(get_high_res_render_proxy(abs_video_path))
                         print(f"Mapped unsupported video format {abs_video_path} to high-res proxy {resolved_path}")
@@ -281,8 +543,9 @@ def render_video(req: RenderRequest):
                 import hashlib
                 d_duration = d_clip.end_time - d_clip.start_time
                 
-                # Construct a unique cache key based on video path, clip start, and duration
-                cache_key_str = f"dialogue_{resolved_path}_{d_clip.clip_start}_{d_duration}"
+                dialogue_vol = req.dialogue_volume if req.dialogue_volume is not None else 1.0
+                # Construct a unique cache key based on video path, clip start, duration, and dialogue volume
+                cache_key_str = f"dialogue_{resolved_path}_{d_clip.clip_start}_{d_duration}_{dialogue_vol}"
                 cache_hash = hashlib.md5(cache_key_str.encode("utf-8")).hexdigest()
                 cache_dir = os.path.abspath("data/trimmed_cache")
                 os.makedirs(cache_dir, exist_ok=True)
@@ -325,9 +588,12 @@ def render_video(req: RenderRequest):
                         "-i", resolved_path,
                         "-c:v", "libx264", "-crf", "18", "-preset", "ultrafast",
                         "-pix_fmt", "yuv420p",
-                        "-c:a", "aac", "-b:a", "192k",
-                        temp_path
                     ]
+                    if dialogue_vol != 1.0:
+                        trim_cmd.extend(["-af", f"volume={dialogue_vol},alimiter=limit=0.99", "-c:a", "aac", "-b:a", "192k"])
+                    else:
+                        trim_cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+                    trim_cmd.append(temp_path)
                     
                     print(f"Trimming dialogue {d_idx}: {resolved_path} from {d_clip.clip_start}s to {d_clip.clip_start + d_duration}s...")
                     trim_res = subprocess.run(trim_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -355,48 +621,64 @@ def render_video(req: RenderRequest):
                     "speaker": d_clip.speaker
                 })
             
+        # Determine normalized volumes for mixing (since HTML volume is clamped to 1.0)
+        dialogue_volume_input = req.dialogue_volume if req.dialogue_volume is not None else 1.0
+        music_volume_input = req.music_volume if req.music_volume is not None else 1.0
+        
+        music_volume_rendered = music_volume_input
+        if dialogue_volume_input > 1.0:
+            dialogue_volume_rendered = 1.0
+        else:
+            dialogue_volume_rendered = dialogue_volume_input
+
         render_data = {
             "slots": slots_data,
             "dialogueClips": dialogue_clips_data,
             "audioPath": abs_audio,
             "lyrics": req.lyrics if req.lyrics else [],
-            "musicVolume": req.music_volume if req.music_volume is not None else 1.0,
-            "dialogueVolume": req.dialogue_volume if req.dialogue_volume is not None else 1.0,
+            "musicVolume": music_volume_rendered,
+            "dialogueVolume": dialogue_volume_rendered,
             "duration": req.slots[-1].end_time if req.slots else 0.0
         }
         
-        # Write render data JSON inside hyperframes template directory
-        with open("hyperframes_template/render_data.json", "w", encoding="utf-8") as f:
+        # Write render data JSON inside hyperframes template directory (with setup_name isolation)
+        render_data_filename = "render_data.json"
+        if req.setup_name:
+            render_data_filename = f"render_data_{req.setup_name}.json"
+        with open(os.path.join("hyperframes_template", render_data_filename), "w", encoding="utf-8") as f:
             json.dump(render_data, f, indent=2)
             
         # Copy audio file to template directory for browser testing/playing
         audio_ext = os.path.splitext(req.audio_path)[1]
-        dest_audio = "hyperframes_template/audio" + audio_ext
+        audio_filename = "audio" + audio_ext
+        if req.setup_name:
+            audio_filename = f"audio_{req.setup_name}{audio_ext}"
+        dest_audio = os.path.join("hyperframes_template", audio_filename)
         shutil.copy2(req.audio_path, dest_audio)
         
         # Dynamically update the index.html with the correct audio file name, video elements, and duration
         try:
             import re
-            audio_filename = "audio" + audio_ext
             duration_val = req.slots[-1].end_time if req.slots else 0.0
             
             # Generate static video elements HTML
             video_tags = []
-            dialogue_vol = req.dialogue_volume if req.dialogue_volume is not None else 1.0
+            dialogue_vol = dialogue_volume_rendered
             for i, slot in enumerate(slots_data):
                 slot_duration = slot["endTime"] - slot["startTime"]
                 # Omit 'muted' and set volume if this slot keeps audio so HyperFrames extracts its audio track
-                audio_attr = f'volume="{dialogue_vol}"' if slot.get("keepAudio") else 'muted'
+                audio_attr = f'volume="{dialogue_vol}" data-volume="{dialogue_vol}"' if slot.get("keepAudio") else 'muted'
                 video_tags.append(
                     f'<video class="video-layer" id="video_{i}" src="{slot["videoPath"]}" data-start="{slot["startTime"]}" data-duration="{slot_duration}" preload="auto" {audio_attr}></video>'
                 )
             
-            # Generate static independent dialogue audio/video elements HTML
+            # Generate static independent dialogue audio elements HTML
             for j, d_clip in enumerate(dialogue_clips_data):
                 d_dur = d_clip["endTime"] - d_clip["startTime"]
-                # Since these are independent dialogues, they should be unmuted (volume=dialogue_vol)
+                # Use <audio> tag for independent dialogue. This guarantees HyperFrames extracts only its audio track
+                # and doesn't visually display or extract video frames.
                 video_tags.append(
-                    f'<video class="dialogue-layer" id="dialogue_video_{j}" src="{d_clip["videoPath"]}" data-start="{d_clip["startTime"]}" data-duration="{d_dur}" preload="auto" volume="{dialogue_vol}" style="display:none;"></video>'
+                    f'<audio class="dialogue-layer" id="dialogue_video_{j}" src="{d_clip["videoPath"]}" data-start="{d_clip["startTime"]}" data-duration="{d_dur}" preload="auto" volume="{dialogue_vol}" data-volume="{dialogue_vol}" data-track-index="2"></audio>'
                 )
                 
             video_elements_html = "\n    ".join(video_tags)
@@ -405,7 +687,7 @@ def render_video(req: RenderRequest):
                 html_content = f.read()
                 
             # Replace audio src and data-volume attributes
-            music_vol = req.music_volume if req.music_volume is not None else 1.0
+            music_vol = music_volume_rendered
             html_content = re.sub(
                 r'<audio id="bg-audio" src="[^"]*"[^>]*>',
                 f'<audio id="bg-audio" src="{audio_filename}" data-start="0" data-duration="{duration_val}" data-track-index="0" data-volume="{music_vol}"></audio>',
@@ -424,34 +706,70 @@ def render_video(req: RenderRequest):
                 html_content
             )
             
-            with open("hyperframes_template/index.html", "w", encoding="utf-8") as f:
+            # Inject custom lyric style CSS if provided
+            if getattr(req, "lyric_style_css", None):
+                css_injection = f"\n<style>\n#lyrics-container {{\n    {req.lyric_style_css}\n}}\n</style>\n</head>"
+                html_content = html_content.replace("</head>", css_injection)
+            
+            # Replace custom lyrics CSS if provided
+            if req.lyric_style_css:
+                layout_style = "position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 999; pointer-events: none; max-width: 80%; line-height: 1.4; display: none;"
+                custom_style = f'style="{layout_style} {req.lyric_style_css}"'
+                html_content = re.sub(
+                    r'<div id="lyrics-container" style="[^"]*">',
+                    f'<div id="lyrics-container" {custom_style}>',
+                    html_content
+                )
+                
+            # If isolated setup_name is used, we need index.html to fetch the correct render_data file
+            if req.setup_name:
+                html_content = html_content.replace("render_data.json", render_data_filename)
+                
+            index_html_filename = "index.html"
+            if req.setup_name:
+                index_html_filename = f"index_{req.setup_name}.html"
+            with open(os.path.join("hyperframes_template", index_html_filename), "w", encoding="utf-8") as f:
                 f.write(html_content)
         except Exception as e:
             print(f"Error updating template attributes dynamically: {e}")
         
         # Call HyperFrames rendering command
         # First we verify if HyperFrames is installed and render
-        # Let's write output to output/mv_output.mp4
-        output_mp4 = os.path.abspath("output/mv_output.mp4")
+        # Let's write output to output/mv_output.mp4 (with setup_name isolation if specified)
+        output_filename = "mv_output.mp4"
+        if req.setup_name:
+            output_filename = f"mv_output_{req.setup_name}.mp4"
+        output_mp4 = os.path.abspath(os.path.join("output", output_filename))
         
         # CLI command execution: npx --yes hyperframes@<pinned-version> render ...
         # For security and compatibility, we will prepare the command but not run it blindly.
         # HyperFrames render tool command structure:
         # npx hyperframes render <template_index_html_path> -o <output_mp4> --data <render_data_json_path>
         template_path = os.path.abspath("hyperframes_template")
-        data_path = os.path.abspath("hyperframes_template/render_data.json")
+        data_path = os.path.abspath(os.path.join("hyperframes_template", render_data_filename))
         
         cmd = [
             "npx", "--yes", "hyperframes@0.6.119", "render", template_path,
             "-o", output_mp4,
             "--data", data_path,
+            "-f", "60",
+            "-q", "high",
+            "--crf", "12",
+            "--video-frame-format", "png",
             "--resolution", "landscape",
+            "--workers", "1",
             "--low-memory-mode",
             "--no-browser-gpu",
-            "--workers", "1"
+            "--protocol-timeout", "1200000",
+            "--browser-timeout", "300"
         ]
+        if req.setup_name:
+            # Tell HyperFrames to render our custom composition HTML instead of index.html
+            cmd.extend(["-c", index_html_filename])
         
         print(f"Executing render command: {' '.join(cmd)}")
+        if callback:
+            callback(30, "正在启动 Headless Chrome 进行 HTML 动画捕捉与视频帧导出...")
         # Prep local node/bin to env PATH
         env = os.environ.copy()
         local_node_bin = os.path.abspath("node/bin")
@@ -470,15 +788,32 @@ def render_video(req: RenderRequest):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             bufsize=1
         )
         
         stdout_lines = []
         if process.stdout:
+            import re
             for line in process.stdout:
                 print(line, end="", flush=True)
                 stdout_lines.append(line)
+                if callback:
+                    # Remove ANSI color codes
+                    clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
+                    # Search for percentage
+                    percent_match = re.search(r'(\d+)%\s+(.*)', clean_line)
+                    if percent_match:
+                        percent_val = int(percent_match.group(1))
+                        msg = percent_match.group(2).strip()
+                        overall_percent = int(30 + (percent_val / 100.0) * 65)
+                        callback(overall_percent, f"HyperFrames: {msg}")
+                    else:
+                        clean_stripped = clean_line.strip()
+                        if clean_stripped:
+                            callback(None, clean_stripped)
         
         process.wait()
         returncode = process.returncode

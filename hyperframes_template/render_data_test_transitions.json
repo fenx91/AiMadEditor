@@ -1,0 +1,126 @@
+{
+  "slots": [
+    {
+      "startTime": 0.0,
+      "endTime": 10.44,
+      "videoPath": "temp_video_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 10.44,
+      "keepAudio": false,
+      "transcript": "\u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 0.0,
+      "endTime": 10.44,
+      "videoPath": "temp_video_1.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 10.44,
+      "keepAudio": false,
+      "transcript": "\u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a \u8d85\u7ea7\u65b0\u9c9c\u5e02\u573a",
+      "speaker": "unknown",
+      "transition": "whip-pan"
+    },
+    {
+      "startTime": 10.44,
+      "endTime": 14.95,
+      "videoPath": "temp_video_2.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 4.51,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 10.44,
+      "endTime": 14.95,
+      "videoPath": "temp_video_3.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 4.51,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 14.95,
+      "endTime": 15.0,
+      "videoPath": "temp_video_4.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 0.05000000000000071,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    },
+    {
+      "startTime": 14.95,
+      "endTime": 15.0,
+      "videoPath": "temp_video_5.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 0.05000000000000071,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": null
+    }
+  ],
+  "dialogueClips": [],
+  "audioPath": "/home/fenxy/editor/data/trimmed_cache/audio_a461c4716472473943ba8316b002eea6.flac",
+  "lyrics": [
+    {
+      "start": 0.0,
+      "end": 10.44,
+      "text": "\u524d\u594f / Intro",
+      "is_intro": true,
+      "beats": [
+        0.139,
+        0.789,
+        1.44,
+        2.09,
+        2.74,
+        3.437,
+        4.133,
+        4.83,
+        5.48,
+        6.13,
+        6.78,
+        7.43,
+        8.034,
+        8.568,
+        9.195,
+        9.822
+      ]
+    },
+    {
+      "start": 10.44,
+      "text": "Hey slow it down",
+      "end": 14.95,
+      "beats": [
+        10.472,
+        11.122,
+        11.773,
+        12.399,
+        13.05,
+        13.7,
+        14.35
+      ]
+    },
+    {
+      "start": 14.95,
+      "text": "Whataya want from me",
+      "end": 15.0,
+      "beats": [
+        14.977,
+        15.627,
+        16.277,
+        16.927
+      ]
+    }
+  ],
+  "musicVolume": 0.8,
+  "dialogueVolume": 1.0,
+  "duration": 15.0
+}

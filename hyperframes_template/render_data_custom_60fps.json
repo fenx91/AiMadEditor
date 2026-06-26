@@ -1,0 +1,219 @@
+{
+  "slots": [
+    {
+      "startTime": 0.0,
+      "endTime": 0.47999999999998977,
+      "videoPath": "temp_video_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 0.47999999999998977,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 0.47999999999998977,
+      "endTime": 1.8199999999999932,
+      "videoPath": "temp_video_1.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 1.3400000000000034,
+      "keepAudio": false,
+      "transcript": "\u5979\u8fdf\u65e9\u4f1a\u53d1\u73b0\u7684 \u4f60\u662f\u4e2a\u597d\u4eba\u7684",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 1.8199999999999932,
+      "endTime": 4.3799999999999955,
+      "videoPath": "temp_video_2.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.5600000000000023,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "whip-pan"
+    },
+    {
+      "startTime": 4.3799999999999955,
+      "endTime": 5.639999999999986,
+      "videoPath": "temp_video_3.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 1.259999999999991,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 5.639999999999986,
+      "endTime": 6.900000000000006,
+      "videoPath": "temp_video_4.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 1.2600000000000193,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 6.900000000000006,
+      "endTime": 9.72999999999999,
+      "videoPath": "temp_video_5.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.829999999999984,
+      "keepAudio": false,
+      "transcript": "\u4f46\u662f\u2026\u592a\u597d\u4e86\u2026\u8fd9\u4e0b\u6211\u80fd\u7ee7\u7eed\u8ddf\u7530\u5c71\u5c0f\u59d0\u4e00\u8d77\u62bd\u70df\u4e86\u5427",
+      "speaker": "sasaki",
+      "transition": "none"
+    },
+    {
+      "startTime": 9.72999999999999,
+      "endTime": 12.099999999999994,
+      "videoPath": "temp_video_6.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.3700000000000045,
+      "keepAudio": false,
+      "transcript": "\u4f50\u4f50\u6728\u5148\u751f\u771f\u662f\u8fdf\u949d\u7684\u5947\u602a",
+      "speaker": "tayama",
+      "transition": "none"
+    },
+    {
+      "startTime": 12.099999999999994,
+      "endTime": 14.680000000000007,
+      "videoPath": "temp_video_7.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.5800000000000125,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "whip-pan"
+    },
+    {
+      "startTime": 14.680000000000007,
+      "endTime": 17.24000000000001,
+      "videoPath": "temp_video_8.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.5600000000000023,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "whip-pan"
+    },
+    {
+      "startTime": 17.24000000000001,
+      "endTime": 19.439999999999998,
+      "videoPath": "temp_video_9.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 2.1999999999999886,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "none"
+    },
+    {
+      "startTime": 19.439999999999998,
+      "endTime": 20.0,
+      "videoPath": "temp_video_10.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 0.5600000000000023,
+      "keepAudio": false,
+      "transcript": "",
+      "speaker": "unknown",
+      "transition": "whip-pan"
+    }
+  ],
+  "dialogueClips": [
+    {
+      "startTime": 0.9000000000000057,
+      "endTime": 9.699999999999989,
+      "videoPath": "temp_dialogue_0.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 8.799999999999983,
+      "transcript": "\u4f46\u662f\u2026\u592a\u597d\u4e86\u2026\u8fd9\u4e0b\u6211\u80fd\u7ee7\u7eed\u8ddf\u7530\u5c71\u5c0f\u59d0\u4e00\u8d77\u62bd\u70df\u4e86\u5427",
+      "speaker": "sasaki"
+    },
+    {
+      "startTime": 13.0,
+      "endTime": 20.0,
+      "videoPath": "temp_dialogue_1.mp4",
+      "clipStart": 0.0,
+      "clipDuration": 7.0,
+      "transcript": "\u4f50\u4f50\u6728\u5148\u751f\u771f\u662f\u8fdf\u949d\u7684\u5947\u602a",
+      "speaker": "tayama"
+    }
+  ],
+  "audioPath": "/home/fenxy/editor/data/trimmed_cache/audio_04d4b28967f971b2a15493b64ea95234.mp3",
+  "lyrics": [
+    {
+      "start": 0.0,
+      "text": "Just keep coming around",
+      "end": 0.47999999999998977,
+      "beats": [
+        186.596,
+        187.222,
+        187.896,
+        188.546,
+        189.173,
+        189.823,
+        190.473
+      ]
+    },
+    {
+      "start": 0.47999999999998977,
+      "text": "Whataya want from me",
+      "end": 1.8199999999999932,
+      "beats": [
+        191.123,
+        191.774
+      ]
+    },
+    {
+      "start": 1.8199999999999932,
+      "text": "Just don't give up",
+      "end": 4.3799999999999955,
+      "beats": [
+        192.401,
+        193.051
+      ]
+    },
+    {
+      "start": 4.3799999999999955,
+      "text": "I'm workin' it out",
+      "end": 6.900000000000006,
+      "beats": []
+    },
+    {
+      "start": 6.900000000000006,
+      "text": "Please don't give in",
+      "end": 9.72999999999999,
+      "beats": []
+    },
+    {
+      "start": 9.72999999999999,
+      "text": "I won't let you down",
+      "end": 12.099999999999994,
+      "beats": []
+    },
+    {
+      "start": 12.099999999999994,
+      "text": "It messed me up",
+      "end": 14.680000000000007,
+      "beats": []
+    },
+    {
+      "start": 14.680000000000007,
+      "text": "Need a second to breathe",
+      "end": 17.24000000000001,
+      "beats": []
+    },
+    {
+      "start": 17.24000000000001,
+      "text": "Just keep coming around",
+      "end": 20.0,
+      "beats": []
+    }
+  ],
+  "musicVolume": 0.3,
+  "dialogueVolume": 5.0,
+  "duration": 20.0
+}

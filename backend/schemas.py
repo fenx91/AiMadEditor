@@ -48,6 +48,8 @@ class TimelineSlot(BaseModel):
     dialogue_clip_start: Optional[float] = None
     dialogue_video_path: Optional[str] = None
     use_original_audio: Optional[bool] = False
+    transition: Optional[str] = None
+
 
 
 class DialogueClip(BaseModel):
@@ -81,6 +83,7 @@ class RenderRequest(BaseModel):
     range_end: Optional[float] = None
     setup_name: Optional[str] = None
     dialogue_clips: Optional[List[DialogueClip]] = None
+    lyric_style_css: Optional[str] = None
 
 
 class LyricLine(BaseModel):
